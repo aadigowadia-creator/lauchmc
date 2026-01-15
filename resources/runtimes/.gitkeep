@@ -1,0 +1,2 @@
+# This directory will contain bundled Java runtimes
+# Run 'npm run prepare:jre' to download and prepare the runtimes
