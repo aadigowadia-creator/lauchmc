@@ -8,7 +8,11 @@ jest.mock('child_process', () => ({
 
 // Mock fs/promises
 jest.mock('fs/promises', () => ({
-  access: jest.fn()
+  access: jest.fn(),
+  mkdir: jest.fn(),
+  readdir: jest.fn(),
+  writeFile: jest.fn(),
+  rm: jest.fn()
 }));
 
 // Mock services
@@ -48,6 +52,20 @@ jest.mock('../main/services/java-service', () => ({
       }))
     }))
   }
+}));
+
+jest.mock('../main/services/profile-service', () => ({
+  ProfileService: jest.fn().mockImplementation(() => ({
+    shouldShowModDialog: jest.fn(() => Promise.resolve(false)),
+    getProfileById: jest.fn(() => Promise.resolve(null))
+  }))
+}));
+
+jest.mock('../main/services/fabric-mod-service', () => ({
+  FabricModService: jest.fn().mockImplementation(() => ({
+    applyModStates: jest.fn(() => Promise.resolve()),
+    setModState: jest.fn(() => Promise.resolve())
+  }))
 }));
 
 describe('GameProcessManager', () => {
@@ -244,6 +262,220 @@ describe('GameProcessManager', () => {
       
       // Should only have been called once (for the first emit)
       expect(mockCallback).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Fabric mod dialog handling', () => {
+    const fs = require('fs/promises');
+    const ProfileService = require('../main/services/profile-service').ProfileService;
+    const FabricModService = require('../main/services/fabric-mod-service').FabricModService;
+
+    beforeEach(() => {
+      // Mock file system access to simulate files exist
+      fs.access.mockResolvedValue(undefined);
+      fs.mkdir.mockResolvedValue(undefined);
+      fs.readdir.mockResolvedValue([]);
+      jest.clearAllMocks();
+    });
+
+    it('should not show mod dialog for non-Fabric profiles', async () => {
+      const vanillaProfile = { ...mockProfile, modLoader: undefined };
+      
+      // Mock spawn to prevent actual process launch
+      const { spawn } = require('child_process');
+      spawn.mockReturnValue({
+        pid: 12345,
+        stdout: { on: jest.fn() },
+        stderr: { on: jest.fn() },
+        on: jest.fn()
+      });
+
+      const mockProfileService = new ProfileService();
+      const mockFabricModService = new FabricModService();
+
+      await gameProcessManager.launchGame({
+        profile: vanillaProfile,
+        versionMetadata: mockVersionMetadata,
+        authData: mockAuthData
+      });
+
+      // Should not call shouldShowModDialog for non-Fabric profiles
+      expect(mockProfileService.shouldShowModDialog).not.toHaveBeenCalled();
+      expect(mockFabricModService.applyModStates).not.toHaveBeenCalled();
+    });
+
+    it('should apply mod states for Fabric profiles when dialog is skipped', async () => {
+      const fabricProfile = { 
+        ...mockProfile, 
+        modLoader: { type: 'fabric' as const, version: '0.15.0' }
+      };
+      
+      // Mock spawn to prevent actual process launch
+      const { spawn } = require('child_process');
+      spawn.mockReturnValue({
+        pid: 12345,
+        stdout: { on: jest.fn() },
+        stderr: { on: jest.fn() },
+        on: jest.fn()
+      });
+
+      // Get the mocked services from GameProcessManager
+      const ProfileService = require('../main/services/profile-service').ProfileService;
+      const FabricModService = require('../main/services/fabric-mod-service').FabricModService;
+      
+      // Reset and configure mocks
+      ProfileService.mockClear();
+      FabricModService.mockClear();
+      
+      const mockShouldShowModDialog = jest.fn().mockResolvedValue(false);
+      const mockApplyModStates = jest.fn().mockResolvedValue(undefined);
+      
+      ProfileService.mockImplementation(() => ({
+        shouldShowModDialog: mockShouldShowModDialog,
+        getProfileById: jest.fn(() => Promise.resolve(null))
+      }));
+      
+      FabricModService.mockImplementation(() => ({
+        applyModStates: mockApplyModStates,
+        setModState: jest.fn(() => Promise.resolve())
+      }));
+
+      // Create a new instance to use the updated mocks
+      const testGameProcessManager = new (require('../main/services/game-process-manager').GameProcessManager)();
+
+      await testGameProcessManager.launchGame({
+        profile: fabricProfile,
+        versionMetadata: mockVersionMetadata,
+        authData: mockAuthData
+      });
+
+      // Should check if dialog should be shown
+      expect(mockShouldShowModDialog).toHaveBeenCalledWith(fabricProfile.id);
+      
+      // Should apply mod states even when dialog is skipped
+      expect(mockApplyModStates).toHaveBeenCalledWith(
+        fabricProfile.id,
+        fabricProfile.installationDir
+      );
+    });
+
+    it('should show mod dialog and update states when callback is provided', async () => {
+      const fabricProfile = { 
+        ...mockProfile, 
+        modLoader: { type: 'fabric' as const, version: '0.15.0' }
+      };
+      
+      // Mock spawn to prevent actual process launch
+      const { spawn } = require('child_process');
+      spawn.mockReturnValue({
+        pid: 12345,
+        stdout: { on: jest.fn() },
+        stderr: { on: jest.fn() },
+        on: jest.fn()
+      });
+
+      // Get the mocked services
+      const ProfileService = require('../main/services/profile-service').ProfileService;
+      const FabricModService = require('../main/services/fabric-mod-service').FabricModService;
+      
+      // Reset and configure mocks
+      ProfileService.mockClear();
+      FabricModService.mockClear();
+      
+      const mockShouldShowModDialog = jest.fn().mockResolvedValue(true);
+      const mockSetModState = jest.fn().mockResolvedValue(undefined);
+      const mockApplyModStates = jest.fn().mockResolvedValue(undefined);
+      
+      ProfileService.mockImplementation(() => ({
+        shouldShowModDialog: mockShouldShowModDialog,
+        getProfileById: jest.fn(() => Promise.resolve(null))
+      }));
+      
+      FabricModService.mockImplementation(() => ({
+        applyModStates: mockApplyModStates,
+        setModState: mockSetModState
+      }));
+
+      // Mock mod dialog callback
+      const mockModStates = new Map([
+        ['fabric-api', true],
+        ['sodium', true],
+        ['lithium', false]
+      ]);
+      const onModDialogRequired = jest.fn().mockResolvedValue(mockModStates);
+
+      // Create a new instance to use the updated mocks
+      const testGameProcessManager = new (require('../main/services/game-process-manager').GameProcessManager)();
+
+      await testGameProcessManager.launchGame({
+        profile: fabricProfile,
+        versionMetadata: mockVersionMetadata,
+        authData: mockAuthData,
+        onModDialogRequired
+      });
+
+      // Should check if dialog should be shown
+      expect(mockShouldShowModDialog).toHaveBeenCalledWith(fabricProfile.id);
+      
+      // Should call the dialog callback
+      expect(onModDialogRequired).toHaveBeenCalled();
+      
+      // Should update mod states based on user selection
+      expect(mockSetModState).toHaveBeenCalledWith(fabricProfile.id, 'fabric-api', true);
+      expect(mockSetModState).toHaveBeenCalledWith(fabricProfile.id, 'sodium', true);
+      expect(mockSetModState).toHaveBeenCalledWith(fabricProfile.id, 'lithium', false);
+      
+      // Should apply mod states
+      expect(mockApplyModStates).toHaveBeenCalledWith(
+        fabricProfile.id,
+        fabricProfile.installationDir
+      );
+    });
+
+    it('should abort launch when user cancels mod dialog', async () => {
+      const fabricProfile = { 
+        ...mockProfile, 
+        modLoader: { type: 'fabric' as const, version: '0.15.0' }
+      };
+      
+      // Get the mocked services
+      const ProfileService = require('../main/services/profile-service').ProfileService;
+      const FabricModService = require('../main/services/fabric-mod-service').FabricModService;
+      
+      // Reset and configure mocks
+      ProfileService.mockClear();
+      FabricModService.mockClear();
+      
+      const mockShouldShowModDialog = jest.fn().mockResolvedValue(true);
+      
+      ProfileService.mockImplementation(() => ({
+        shouldShowModDialog: mockShouldShowModDialog,
+        getProfileById: jest.fn(() => Promise.resolve(null))
+      }));
+      
+      FabricModService.mockImplementation(() => ({
+        applyModStates: jest.fn().mockResolvedValue(undefined),
+        setModState: jest.fn().mockResolvedValue(undefined)
+      }));
+
+      // Mock mod dialog callback returning null (user cancelled)
+      const onModDialogRequired = jest.fn().mockResolvedValue(null);
+
+      // Create a new instance to use the updated mocks
+      const testGameProcessManager = new (require('../main/services/game-process-manager').GameProcessManager)();
+
+      await expect(testGameProcessManager.launchGame({
+        profile: fabricProfile,
+        versionMetadata: mockVersionMetadata,
+        authData: mockAuthData,
+        onModDialogRequired
+      })).rejects.toThrow('Launch cancelled by user');
+
+      // Should check if dialog should be shown
+      expect(mockShouldShowModDialog).toHaveBeenCalledWith(fabricProfile.id);
+      
+      // Should call the dialog callback
+      expect(onModDialogRequired).toHaveBeenCalled();
     });
   });
 });

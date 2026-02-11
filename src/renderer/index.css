@@ -561,6 +561,43 @@ body {
   font-size: 14px;
 }
 
+.launch-error {
+  background: rgba(231, 76, 60, 0.1);
+  border: 1px solid rgba(231, 76, 60, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.launch-error p {
+  margin: 0 0 12px 0;
+  color: #e74c3c;
+  font-weight: 600;
+}
+
+.error-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.error-actions .btn-primary {
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #3498db, #2980b9);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.error-actions .btn-primary:hover {
+  background: linear-gradient(135deg, #2980b9, #1f5f8b);
+  transform: translateY(-1px);
+}
+
 .dismiss-btn {
   background: transparent;
   border: none;
@@ -1005,6 +1042,133 @@ body {
   background: rgba(231, 76, 60, 0.3);
 }
 
+.profile-action-btn.manage-mods {
+  color: #f1c40f;
+}
+
+.profile-action-btn.manage-mods:hover {
+  background: rgba(241, 196, 15, 0.2);
+}
+
+/* Fabric Profile Specific Styles */
+.profile-create-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.create-fabric-profile-btn {
+  padding: 8px 16px;
+  background: #f1c40f;
+  color: #2c3e50;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.create-fabric-profile-btn:hover {
+  background: #f39c12;
+}
+
+.create-forge-profile-btn {
+  padding: 8px 16px;
+  background: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.create-forge-profile-btn:hover {
+  background: #c0392b;
+}
+
+.mod-count-badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(46, 204, 113, 0.2);
+  color: #2ecc71;
+  margin-left: 4px;
+}
+
+.fabric-install-progress {
+  background: rgba(241, 196, 15, 0.1);
+  border: 1px solid rgba(241, 196, 15, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.fabric-install-progress .progress-header h4 {
+  color: #f1c40f;
+  margin: 0 0 8px 0;
+  font-size: 16px;
+}
+
+.fabric-install-progress .progress-header p {
+  color: rgba(255, 255, 255, 0.8);
+  margin: 0 0 12px 0;
+  font-size: 14px;
+}
+
+.fabric-install-progress .progress-details p {
+  color: rgba(255, 255, 255, 0.9);
+  margin: 0 0 8px 0;
+  font-size: 13px;
+}
+
+.fabric-install-progress .progress-bar {
+  width: 100%;
+  height: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.fabric-install-progress .progress-fill {
+  height: 100%;
+  background: #f1c40f;
+  transition: width 0.3s ease;
+}
+
+.fabric-profile-form {
+  max-width: 500px;
+  width: 90vw;
+}
+
+.fabric-info {
+  background: rgba(241, 196, 15, 0.1);
+  border: 1px solid rgba(241, 196, 15, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.fabric-info p {
+  margin: 0 0 12px 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+}
+
+.fabric-info ul {
+  margin: 12px 0;
+  padding-left: 20px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.fabric-info li {
+  margin: 4px 0;
+  font-size: 13px;
+}
+
 /* Profile Configuration */
 .profile-configuration {
   background: rgba(0, 0, 0, 0.3);
@@ -1420,6 +1584,74 @@ body {
   background: linear-gradient(135deg, #e67e22, #d35400);
 }
 
+.vanilla-launch-btn {
+  width: 100%;
+  padding: 12px 20px;
+  margin-top: 8px;
+  background: linear-gradient(135deg, #9b59b6, #8e44ad);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.vanilla-launch-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #8e44ad, #7d3c98);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(155, 89, 182, 0.3);
+}
+
+.vanilla-launch-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.vanilla-launch-btn:disabled {
+  background: linear-gradient(135deg, #7f8c8d, #95a5a6);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.forge-install-btn {
+  width: 100%;
+  padding: 12px 20px;
+  margin-top: 8px;
+  background: linear-gradient(135deg, #e67e22, #d35400);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.forge-install-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d35400, #c0392b);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(230, 126, 34, 0.3);
+}
+
+.forge-install-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.forge-install-btn:disabled {
+  background: linear-gradient(135deg, #7f8c8d, #95a5a6);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .loading-spinner.small {
   width: 20px;
   height: 20px;
@@ -1641,6 +1873,33 @@ body {
   color: rgba(255, 255, 255, 0.8);
   line-height: 1.6;
   margin: 0;
+}
+
+.settings-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.forge-settings-btn {
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.forge-settings-btn:hover {
+  background: linear-gradient(135deg, #45a049 0%, #3d8b40 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
 }
 
 /* Error Boundary Styles */
@@ -2082,4 +2341,40 @@ body {
   justify-content: center;
   z-index: 1000;
   backdrop-filter: blur(4px);
+}
+/* Forge Mod Manager Button */
+.forge-mod-manager-btn {
+  padding: 12px 24px;
+  background: rgba(231, 76, 60, 0.2);
+  border: 2px solid rgba(231, 76, 60, 0.4);
+  border-radius: 8px;
+  color: #e74c3c;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.forge-mod-manager-btn:hover:not(:disabled) {
+  background: rgba(231, 76, 60, 0.3);
+  border-color: rgba(231, 76, 60, 0.6);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3);
+}
+
+.forge-mod-manager-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.forge-mod-manager-btn:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 2px 6px rgba(231, 76, 60, 0.2);
 }

@@ -47,11 +47,13 @@ const electronAPI = {
   getProfiles: () => ipcRenderer.invoke('profiles:getAll'),
   getProfileById: (id: number) => ipcRenderer.invoke('profiles:getById', id),
   createProfile: (profile: any) => ipcRenderer.invoke('profiles:create', profile),
+  createFabricProfile: (profile: any) => ipcRenderer.invoke('profiles:createFabricProfile', profile),
   updateProfile: (id: number, profile: any) => ipcRenderer.invoke('profiles:update', id, profile),
   deleteProfile: (id: number) => ipcRenderer.invoke('profiles:delete', id),
 
   // Game Process Management API
   launchGame: (options: any) => ipcRenderer.invoke('game:launch', options),
+  launchVanilla: (options: any) => ipcRenderer.invoke('game:launchVanilla', options),
   killGame: (processId: number) => ipcRenderer.invoke('game:kill', processId),
   getActiveProcesses: () => ipcRenderer.invoke('game:getActiveProcesses'),
   getProcessInfo: (processId: number) => ipcRenderer.invoke('game:getProcessInfo', processId),
@@ -185,6 +187,65 @@ const electronAPI = {
   removeAllUpdateListeners: () => {
     ipcRenderer.removeAllListeners('update:status');
     ipcRenderer.removeAllListeners('update:downloadProgress');
+  },
+
+  // Fabric Mod Management API
+  installEssentialMods: (profileId: number, gameVersion: string) => ipcRenderer.invoke('mods:installEssentialMods', profileId, gameVersion),
+  getAllMods: (profileId: number) => ipcRenderer.invoke('mods:getAllMods', profileId),
+  getModStates: (profileId: number) => ipcRenderer.invoke('mods:getModStates', profileId),
+  setModState: (profileId: number, modId: string, enabled: boolean) => ipcRenderer.invoke('mods:setModState', profileId, modId, enabled),
+  addCustomMod: (profileId: number, url: string) => ipcRenderer.invoke('mods:addCustomMod', profileId, url),
+  removeCustomMod: (profileId: number, modId: string) => ipcRenderer.invoke('mods:removeCustomMod', profileId, modId),
+  getProfilePreference: (profileId: number, key: string) => ipcRenderer.invoke('mods:getProfilePreference', profileId, key),
+  setProfilePreference: (profileId: number, key: string, value: any) => ipcRenderer.invoke('mods:setProfilePreference', profileId, key, value),
+  
+  // Forge Mod Management API
+  createForgeProfile: (profile: any, enableOptiFine?: boolean) => ipcRenderer.invoke('profiles:createForgeProfile', profile, enableOptiFine),
+  getForgeModStates: (profileId: number) => ipcRenderer.invoke('forgeMods:getModStates', profileId),
+  updateForgeModState: (profileId: number, modName: string, enabled: boolean) => ipcRenderer.invoke('forgeMods:updateModState', profileId, modName, enabled),
+  applyForgeModStates: (profileId: number) => ipcRenderer.invoke('forgeMods:applyModStates', profileId),
+  getForgeModStatistics: (profileId: number) => ipcRenderer.invoke('forgeMods:getStatistics', profileId),
+  scanForgeModsDirectory: (profileId: number, modsDirectory: string) => ipcRenderer.invoke('forgeMods:scanDirectory', profileId, modsDirectory),
+  
+  // Forge Installer API
+  checkJava: () => ipcRenderer.invoke('forge:checkJava'),
+  getAvailableForgeVersions: (mcVersion: string) => ipcRenderer.invoke('forge:getAvailableVersions', mcVersion),
+  getRecommendedForgeVersion: (mcVersion: string) => ipcRenderer.invoke('forge:getRecommendedVersion', mcVersion),
+  isForgeInstalled: (mcVersion: string, forgeVersion: string, minecraftDir: string) => ipcRenderer.invoke('forge:isInstalled', mcVersion, forgeVersion, minecraftDir),
+  installForge: (mcVersion: string, forgeVersion: string, minecraftDir: string) => ipcRenderer.invoke('forge:install', mcVersion, forgeVersion, minecraftDir),
+  updateProfileVersion: (profileId: number, newVersionId: string) => ipcRenderer.invoke('forge:updateProfileVersion', profileId, newVersionId),
+  
+  // Forge Settings API
+  getOptiFineSettings: () => ipcRenderer.invoke('forgeSettings:getOptiFineSettings'),
+  updateOptiFineSettings: (settings: any) => ipcRenderer.invoke('forgeSettings:updateOptiFineSettings', settings),
+  
+  // OptiFine Installation API
+  installOptiFine: (gameVersion: string, modsDirectory: string) => ipcRenderer.invoke('optifine:install', gameVersion, modsDirectory),
+  openModsFolder: (modsDirectory: string) => ipcRenderer.invoke('system:openFolder', modsDirectory),
+  getModManagementSettings: () => ipcRenderer.invoke('forgeSettings:getModManagementSettings'),
+  updateModManagementSettings: (settings: any) => ipcRenderer.invoke('forgeSettings:updateModManagementSettings', settings),
+  getProfileSettings: () => ipcRenderer.invoke('forgeSettings:getProfileSettings'),
+  updateProfileSettings: (settings: any) => ipcRenderer.invoke('forgeSettings:updateProfileSettings', settings),
+  getAllForgeSettings: () => ipcRenderer.invoke('forgeSettings:getAllForgeSettings'),
+  resetAllForgeSettings: () => ipcRenderer.invoke('forgeSettings:resetAllForgeSettings'),
+  exportForgeSettings: () => ipcRenderer.invoke('forgeSettings:exportSettings'),
+  importForgeSettings: (jsonData: string) => ipcRenderer.invoke('forgeSettings:importSettings', jsonData),
+  validateForgeSettings: () => ipcRenderer.invoke('forgeSettings:validateSettings'),
+  
+  // Mod installation progress listener
+  onModInstallProgress: (callback: (progress: any) => void) => {
+    ipcRenderer.on('mods:installProgress', (_, progress) => callback(progress));
+  },
+  removeModInstallProgressListener: () => {
+    ipcRenderer.removeAllListeners('mods:installProgress');
+  },
+
+  // Forge installer events
+  onForgeInstallProgress: (callback: (progress: any) => void) => {
+    ipcRenderer.on('forge:installProgress', (_, progress) => callback(progress));
+  },
+  removeForgeInstallProgressListener: () => {
+    ipcRenderer.removeAllListeners('forge:installProgress');
   },
 };
 

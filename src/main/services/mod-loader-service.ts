@@ -261,9 +261,13 @@ export class ModLoaderService {
   ): Promise<boolean> {
     onProgress?.({ stage: 'Downloading Fabric installer', percentage: 20 });
 
+    // Fabric needs to install to the root Minecraft directory, not profile-specific directory
+    // Extract the root .minecraft directory from the installation path
+    const minecraftRoot = this.getMinecraftRootDirectory(installationDir);
+
     // Download Fabric installer
     const installerUrl = 'https://maven.fabricmc.net/net/fabricmc/fabric-installer/0.11.2/fabric-installer-0.11.2.jar';
-    const installerPath = path.join(installationDir, 'fabric-installer.jar');
+    const installerPath = path.join(minecraftRoot, 'fabric-installer.jar');
     
     const response = await axios.get(installerUrl, { responseType: 'stream' });
     const writer = require('fs').createWriteStream(installerPath);
@@ -276,7 +280,7 @@ export class ModLoaderService {
 
     onProgress?.({ stage: 'Running Fabric installer', percentage: 60 });
 
-    // Run installer
+    // Run installer with root Minecraft directory
     return new Promise((resolve) => {
       const installer = spawn('java', [
         '-jar',
@@ -284,9 +288,9 @@ export class ModLoaderService {
         'client',
         '-mcversion', modLoaderInfo.gameVersion,
         '-loader', modLoaderInfo.version,
-        '-dir', installationDir
+        '-dir', minecraftRoot
       ], {
-        cwd: installationDir
+        cwd: minecraftRoot
       });
 
       installer.on('close', async (code) => {
@@ -367,6 +371,24 @@ export class ModLoaderService {
   }
 
   /**
+   * Get the root Minecraft directory from an installation path
+   * Handles both root .minecraft and profile-specific subdirectories
+   */
+  private getMinecraftRootDirectory(installationDir: string): string {
+    // If the path contains 'profiles', extract the root .minecraft directory
+    if (installationDir.includes(path.sep + 'profiles' + path.sep)) {
+      const parts = installationDir.split(path.sep);
+      const profilesIndex = parts.indexOf('profiles');
+      if (profilesIndex > 0) {
+        return parts.slice(0, profilesIndex).join(path.sep);
+      }
+    }
+    
+    // If it's already the root directory or doesn't contain profiles, return as-is
+    return installationDir;
+  }
+
+  /**
    * Check if a mod loader is installed for a specific game version
    */
   async isModLoaderInstalled(
@@ -376,7 +398,9 @@ export class ModLoaderService {
     installationDir: string
   ): Promise<boolean> {
     try {
-      const versionsDir = path.join(installationDir, 'versions');
+      // Use root Minecraft directory for checking installations
+      const minecraftRoot = this.getMinecraftRootDirectory(installationDir);
+      const versionsDir = path.join(minecraftRoot, 'versions');
       
       let versionId: string;
       switch (type) {
@@ -411,7 +435,9 @@ export class ModLoaderService {
    */
   async getInstalledModLoaders(installationDir: string): Promise<ModLoaderInfo[]> {
     try {
-      const versionsDir = path.join(installationDir, 'versions');
+      // Use root Minecraft directory for checking installations
+      const minecraftRoot = this.getMinecraftRootDirectory(installationDir);
+      const versionsDir = path.join(minecraftRoot, 'versions');
       const versions = await fs.readdir(versionsDir);
       
       const modLoaders: ModLoaderInfo[] = [];

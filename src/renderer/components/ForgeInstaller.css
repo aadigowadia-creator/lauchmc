@@ -1,0 +1,283 @@
+.forge-installer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.forge-installer {
+  background: linear-gradient(135deg, #2c3e50, #34495e);
+  border-radius: 12px;
+  padding: 24px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  color: white;
+}
+
+.installer-header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.installer-header h3 {
+  font-size: 24px;
+  margin-bottom: 8px;
+  color: #3498db;
+}
+
+.installer-header p {
+  font-size: 14px;
+  opacity: 0.8;
+  margin: 0;
+}
+
+.loading-section {
+  text-align: center;
+  padding: 40px 20px;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255, 255, 255, 0.2);
+  border-left: 4px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 16px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.version-selection {
+  margin-bottom: 24px;
+}
+
+.version-selection label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #ecf0f1;
+}
+
+.version-selection select {
+  width: 100%;
+  padding: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.version-selection select:focus {
+  outline: none;
+  border-color: #3498db;
+}
+
+.version-selection select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.installation-progress {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+}
+
+.progress-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.stage-icon {
+  font-size: 18px;
+}
+
+.stage-text {
+  font-weight: 600;
+  flex: 1;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3498db, #2ecc71);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-percentage {
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.error-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(231, 76, 60, 0.2);
+  border: 1px solid rgba(231, 76, 60, 0.4);
+  border-radius: 8px;
+  margin-bottom: 24px;
+  color: #e74c3c;
+}
+
+.error-icon {
+  font-size: 16px;
+  margin-top: 2px;
+}
+
+.error-content {
+  flex: 1;
+}
+
+.error-help {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(231, 76, 60, 0.3);
+  font-size: 13px;
+}
+
+.error-help p {
+  margin: 4px 0;
+}
+
+.error-help a {
+  color: #3498db;
+  text-decoration: underline;
+}
+
+.error-help a:hover {
+  color: #2980b9;
+}
+
+.installer-actions {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.installer-actions button {
+  flex: 1;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #3498db, #2980b9);
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #2980b9, #1f5f8b);
+  transform: translateY(-2px);
+}
+
+.btn-primary:disabled {
+  background: linear-gradient(135deg, #7f8c8d, #95a5a6);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.installer-info {
+  padding: 16px;
+  background: rgba(52, 152, 219, 0.1);
+  border: 1px solid rgba(52, 152, 219, 0.3);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.installer-info p {
+  margin: 0 0 8px 0;
+  font-weight: 600;
+}
+
+.installer-info ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.installer-info li {
+  margin-bottom: 4px;
+  opacity: 0.9;
+}
+
+.success-message {
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(46, 204, 113, 0.2);
+  border: 1px solid rgba(46, 204, 113, 0.4);
+  border-radius: 6px;
+  color: #27ae60;
+}
+
+.success-message p {
+  margin: 4px 0;
+}
+
+/* Scrollbar styling */
+.forge-installer::-webkit-scrollbar {
+  width: 8px;
+}
+
+.forge-installer::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.forge-installer::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.forge-installer::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}

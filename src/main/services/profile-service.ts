@@ -2,9 +2,10 @@ import { ProfileRepository } from '../repositories/profile-repository';
 import { UserProfile, CreateProfileData, UpdateProfileData } from '../models';
 import { ProfileConfigService, MemoryConfiguration, JvmPreset, SystemSpecification, InstallationDirectoryInfo } from './profile-config-service';
 import { ModLoaderService, ModLoaderInfo } from './mod-loader-service';
+import { FabricModService, ModDownloadProgress } from './fabric-mod-service';
+import { ProfilePreferencesRepository } from '../repositories/profile-preferences-repository';
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import * as os from 'os';
 
 export interface ProfileValidationError {
   field: string;
@@ -20,11 +21,15 @@ export class ProfileService {
   private profileRepository: ProfileRepository;
   private configService: ProfileConfigService;
   private modLoaderService: ModLoaderService;
+  private fabricModService: FabricModService;
+  private profilePreferencesRepository: ProfilePreferencesRepository;
 
   constructor() {
     this.profileRepository = new ProfileRepository();
     this.configService = new ProfileConfigService();
     this.modLoaderService = new ModLoaderService();
+    this.fabricModService = new FabricModService();
+    this.profilePreferencesRepository = new ProfilePreferencesRepository();
   }
 
   /**
@@ -942,5 +947,279 @@ export class ProfileService {
     });
     
     return filteredArgs.join(' ');
+  }
+
+  // Forge Profile Management Methods
+
+  /**
+   * Create Forge profile with OptiFine preinstalled
+   * Requirements: 1.1, 1.4, 3.4
+   */
+  public async createForgeProfile(
+    profileData: CreateProfileData,
+    enableOptiFine: boolean = true,
+    onProgress?: (progress: { stage: string; percentage: number; message?: string }) => void
+  ): Promise<UserProfile> {
+    // Validate Forge mod loader is specified
+    if (!profileData.modLoader || profileData.modLoader.type !== 'forge') {
+      throw new Error('Profile must use Forge mod loader');
+    }
+
+    try {
+      // Import ForgeModService here to avoid circular dependency
+      const { ForgeModService } = await import('./forge-mod-service');
+      const forgeModService = new ForgeModService();
+
+      // Use ForgeModService's createForgeProfile method which handles everything
+      const forgeProfileOptions = {
+        profileName: profileData.name,
+        gameVersion: profileData.versionId, // vanilla version
+        forgeVersion: profileData.modLoader.version,
+        installationDir: profileData.installationDir,
+        memoryMin: profileData.memoryMin,
+        memoryMax: profileData.memoryMax,
+        jvmArgs: profileData.jvmArgs,
+        enableOptiFine
+      };
+
+      const forgeProfile = await forgeModService.createForgeProfile(forgeProfileOptions, onProgress);
+      
+      // Return the created profile (ForgeProfile extends UserProfile)
+      return forgeProfile;
+    } catch (error) {
+      console.error('Failed to create Forge profile:', error);
+      throw new Error(`Failed to create Forge profile: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Validate Forge profile configuration
+   * Requirements: 1.1, 1.4, 3.4
+   */
+  public async validateForgeProfile(profileId: number): Promise<{
+    isValid: boolean;
+    issues: string[];
+    forgeVersion?: string;
+    hasOptiFine?: boolean;
+  }> {
+    const profile = await this.getProfileById(profileId);
+    if (!profile) {
+      return { isValid: false, issues: ['Profile not found'] };
+    }
+
+    const issues: string[] = [];
+
+    // Check if it's a Forge profile
+    if (!profile.modLoader || profile.modLoader.type !== 'forge') {
+      issues.push('Profile is not configured for Forge mod loader');
+      return { isValid: false, issues };
+    }
+
+    // Check if Forge is installed
+    try {
+      const { ModLoaderService } = await import('./mod-loader-service');
+      const modLoaderService = new ModLoaderService();
+      
+      const baseGameVersion = this.extractBaseGameVersion(profile.versionId, 'forge');
+      const isInstalled = await modLoaderService.isModLoaderInstalled(
+        'forge',
+        baseGameVersion,
+        profile.modLoader.version,
+        profile.installationDir
+      );
+
+      if (!isInstalled) {
+        issues.push(`Forge ${profile.modLoader.version} is not installed`);
+      }
+    } catch (error) {
+      issues.push(`Failed to verify Forge installation: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+
+    // Check mods directory
+    const modsDirectory = path.join(profile.installationDir, 'mods');
+    try {
+      await fs.access(modsDirectory);
+    } catch {
+      issues.push('Mods directory does not exist');
+    }
+
+    // Check for OptiFine
+    let hasOptiFine = false;
+    try {
+      const { ForgeModRepository } = await import('../repositories/forge-mod-repository');
+      const forgeModRepository = new ForgeModRepository();
+      const modStates = await forgeModRepository.getModStates(profileId.toString());
+      hasOptiFine = modStates.some(mod => mod.modName.toLowerCase().includes('optifine'));
+    } catch (error) {
+      console.warn('Failed to check OptiFine status:', error);
+    }
+
+    return {
+      isValid: issues.length === 0,
+      issues,
+      forgeVersion: profile.modLoader.version,
+      hasOptiFine
+    };
+  }
+
+  /**
+   * Delete Forge profile with mod cleanup
+   * Requirements: 1.1, 1.4, 3.4
+   */
+  public async deleteForgeProfile(profileId: number, deleteFiles: boolean = false): Promise<boolean> {
+    const profile = await this.getProfileById(profileId);
+    if (!profile) {
+      return false;
+    }
+
+    // Clean up Forge-specific data
+    if (profile.modLoader?.type === 'forge') {
+      try {
+        // Clean up mod states
+        const { ForgeModRepository } = await import('../repositories/forge-mod-repository');
+        const forgeModRepository = new ForgeModRepository();
+        await forgeModRepository.deleteByProfileId(profileId.toString());
+
+        // Clean up OptiFine configuration
+        const { OptiFineConfigRepository } = await import('../repositories/optifine-config-repository');
+        const optiFineConfigRepository = new OptiFineConfigRepository();
+        await optiFineConfigRepository.deleteByProfileId(profileId.toString());
+      } catch (error) {
+        console.warn('Failed to clean up Forge mod data:', error);
+        // Continue with profile deletion even if cleanup fails
+      }
+    }
+
+    // Delete the profile using the base method
+    return await this.deleteProfile(profileId, deleteFiles);
+  }
+
+  // Fabric Profile Management Methods
+
+  /**
+   * Create Fabric profile with essential mods preinstalled
+   * Requirements: 1.1, 1.5, 6.3, 6.4
+   */
+  public async createFabricProfile(
+    profileData: CreateProfileData,
+    onModProgress?: (progress: ModDownloadProgress) => void
+  ): Promise<UserProfile> {
+    // Validate Fabric mod loader is specified
+    if (!profileData.modLoader || profileData.modLoader.type !== 'fabric') {
+      throw new Error('Profile must use Fabric mod loader');
+    }
+
+    // Generate the Fabric version ID from the mod loader info
+    const fabricVersionId = this.generateModdedVersionId({
+      type: 'fabric',
+      version: profileData.modLoader.version,
+      gameVersion: profileData.versionId, // This is the vanilla version like "1.21.5"
+      stable: true
+    });
+
+    // Create profile with the Fabric version ID
+    const fabricProfileData = {
+      ...profileData,
+      versionId: fabricVersionId // Use Fabric version ID instead of vanilla
+    };
+
+    const profile = await this.createProfile(fabricProfileData);
+
+    try {
+      // Install essential mods (use the base game version for mod compatibility)
+      await this.fabricModService.installEssentialMods(
+        profile.id!,
+        profileData.versionId, // Pass vanilla version for mod compatibility checking
+        profile.installationDir,
+        onModProgress
+      );
+
+      return profile;
+    } catch (error) {
+      // Rollback profile creation on mod installation failure
+      console.error('Failed to install essential mods, rolling back profile creation:', error);
+      await this.deleteProfile(profile.id!, true);
+      throw new Error(`Failed to create Fabric profile: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Check if profile should show mod dialog before launch
+   * Requirements: 6.3, 6.4
+   */
+  public async shouldShowModDialog(profileId: number): Promise<boolean> {
+    const profile = await this.getProfileById(profileId);
+    if (!profile || profile.modLoader?.type !== 'fabric') {
+      return false;
+    }
+
+    // Check user preference for "Don't ask again"
+    const skipDialog = await this.profilePreferencesRepository.getBooleanPreference(
+      profileId,
+      'skipModDialog',
+      false
+    );
+    
+    return !skipDialog;
+  }
+
+  /**
+   * Get profile preference value
+   * Requirements: 6.3, 6.4
+   */
+  public async getProfilePreference(
+    profileId: number,
+    preferenceKey: string
+  ): Promise<string | null> {
+    return await this.profilePreferencesRepository.getPreferenceValue(
+      profileId,
+      preferenceKey
+    );
+  }
+
+  /**
+   * Set profile preference value
+   * Requirements: 6.3, 6.4
+   */
+  public async setProfilePreference(
+    profileId: number,
+    preferenceKey: string,
+    preferenceValue: string
+  ): Promise<void> {
+    await this.profilePreferencesRepository.setPreference(
+      profileId,
+      preferenceKey,
+      preferenceValue
+    );
+  }
+
+  /**
+   * Get boolean profile preference (convenience method)
+   */
+  public async getBooleanProfilePreference(
+    profileId: number,
+    preferenceKey: string,
+    defaultValue: boolean = false
+  ): Promise<boolean> {
+    return await this.profilePreferencesRepository.getBooleanPreference(
+      profileId,
+      preferenceKey,
+      defaultValue
+    );
+  }
+
+  /**
+   * Set boolean profile preference (convenience method)
+   */
+  public async setBooleanProfilePreference(
+    profileId: number,
+    preferenceKey: string,
+    value: boolean
+  ): Promise<void> {
+    await this.profilePreferencesRepository.setBooleanPreference(
+      profileId,
+      preferenceKey,
+      value
+    );
   }
 }

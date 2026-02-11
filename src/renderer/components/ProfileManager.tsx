@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { ForgeProfileCreator } from './ForgeProfileCreator';
 
 interface UserProfile {
   id: number;
@@ -20,6 +21,14 @@ interface ProfileManagerProps {
   onProfileSelect?: (profile: UserProfile) => void;
 }
 
+interface ModDownloadProgress {
+  modId: string;
+  modName: string;
+  downloaded: number;
+  total: number;
+  percentage: number;
+}
+
 export const ProfileManager: React.FC<ProfileManagerProps> = ({ onProfileSelect }) => {
   const [profiles, setProfiles] = useState<UserProfile[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<UserProfile | null>(null);
@@ -28,10 +37,19 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({ onProfileSelect 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [editingProfile, setEditingProfile] = useState<UserProfile | null>(null);
+  const [showFabricForm, setShowFabricForm] = useState(false);
+  const [showForgeForm, setShowForgeForm] = useState(false);
+  const [fabricInstallProgress, setFabricInstallProgress] = useState<ModDownloadProgress | null>(null);
+  const [modCounts, setModCounts] = useState<Map<number, number>>(new Map());
 
   useEffect(() => {
     loadProfiles();
   }, []);
+
+  useEffect(() => {
+    // Load mod counts for Fabric profiles
+    loadModCounts();
+  }, [profiles]);
 
   const loadProfiles = async () => {
     try {
@@ -51,6 +69,24 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({ onProfileSelect 
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const loadModCounts = async () => {
+    const counts = new Map<number, number>();
+    
+    for (const profile of profiles) {
+      if (profile.modLoader?.type === 'fabric') {
+        try {
+          const mods = await window.electronAPI.getAllMods(profile.id);
+          counts.set(profile.id, mods.length);
+        } catch (err) {
+          console.error(`Failed to load mod count for profile ${profile.id}:`, err);
+          counts.set(profile.id, 0);
+        }
+      }
+    }
+    
+    setModCounts(counts);
   };
 
   const handleProfileSelect = (profile: UserProfile) => {
@@ -101,16 +137,90 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({ onProfileSelect 
     }
   };
 
+  const handleCreateFabricProfile = async (profileData: any) => {
+    try {
+      setFabricInstallProgress(null);
+      
+      const onProgress = (progress: ModDownloadProgress) => {
+        setFabricInstallProgress(progress);
+      };
+
+      await window.electronAPI.createFabricProfile(profileData);
+      setFabricInstallProgress(null);
+      setShowFabricForm(false);
+      await loadProfiles();
+    } catch (err) {
+      console.error('Failed to create Fabric profile:', err);
+      setError(err instanceof Error ? err.message : 'Failed to create Fabric profile');
+      setFabricInstallProgress(null);
+    }
+  };
+
+  const handleManageMods = (profile: UserProfile) => {
+    // This will be implemented when the ModToggleDialog is integrated
+    console.log('Manage mods for profile:', profile.name);
+    // For now, just show an alert
+    alert(`Mod management for ${profile.name} will be available when launching the game.`);
+  };
+
+  const handleCreateForgeProfile = async (profileData: any) => {
+    try {
+      setFabricInstallProgress(null);
+      
+      const onProgress = (progress: ModDownloadProgress) => {
+        setFabricInstallProgress(progress);
+      };
+
+      // For now, simulate the Forge profile creation
+      console.log('Creating Forge profile with data:', profileData);
+      
+      // Simulate progress updates
+      const progressSteps = [
+        { modId: 'forge', modName: 'Forge', downloaded: 0, total: 100, percentage: 10 },
+        { modId: 'forge', modName: 'Forge', downloaded: 30, total: 100, percentage: 30 },
+        { modId: 'optifine', modName: 'OptiFine', downloaded: 60, total: 100, percentage: 60 },
+        { modId: 'optifine', modName: 'OptiFine', downloaded: 80, total: 100, percentage: 80 },
+        { modId: 'complete', modName: 'Complete', downloaded: 100, total: 100, percentage: 100 }
+      ];
+
+      for (const step of progressSteps) {
+        onProgress(step);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      setFabricInstallProgress(null);
+      setShowForgeForm(false);
+      await loadProfiles();
+    } catch (err) {
+      console.error('Failed to create Forge profile:', err);
+      setError(err instanceof Error ? err.message : 'Failed to create Forge profile');
+      setFabricInstallProgress(null);
+    }
+  };
+
   return (
     <div className="profile-manager">
       <div className="profile-manager-header">
         <h3>Profiles</h3>
-        <button
-          className="create-profile-btn"
-          onClick={() => setShowCreateForm(true)}
-        >
-          + New Profile
-        </button>
+        <div className="profile-create-buttons">
+          <button
+            className="create-profile-btn"
+            onClick={() => setShowCreateForm(true)}
+          >
+            + New Profile
+          </button>
+          <button
+            className="create-fabric-profile-btn"
+            onClick={() => setShowFabricForm(true)}
+          >
+            + Create Fabric Profile
+          </button>
+          <button
+            className="create-forge-profile-btn"
+            onClick={() => setShowForgeForm(true)}
+          >
+            + Create Forge Profile
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -119,6 +229,25 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({ onProfileSelect 
           <button onClick={() => setError(null)} className="dismiss-btn">
             Dismiss
           </button>
+        </div>
+      )}
+
+      {fabricInstallProgress && (
+        <div className="fabric-install-progress">
+          <div className="progress-header">
+            <h4>Installing Essential Mods</h4>
+            <p>Setting up your Fabric profile with essential mods...</p>
+          </div>
+          <div className="progress-details">
+            <p>Downloading: {fabricInstallProgress.modName}</p>
+            <div className="progress-bar">
+              <div 
+                className="progress-fill" 
+                style={{ width: `${fabricInstallProgress.percentage}%` }}
+              />
+            </div>
+            <p>{fabricInstallProgress.percentage}% ({fabricInstallProgress.downloaded} / {fabricInstallProgress.total} bytes)</p>
+          </div>
         </div>
       )}
 
@@ -149,6 +278,11 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({ onProfileSelect 
                           {profile.modLoader.type}
                         </span>
                       )}
+                      {profile.modLoader?.type === 'fabric' && modCounts.has(profile.id) && (
+                        <span className="mod-count-badge">
+                          {modCounts.get(profile.id)} mods
+                        </span>
+                      )}
                     </div>
                     <div className="profile-details">
                       <span>Version: {profile.versionId}</span>
@@ -156,6 +290,18 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({ onProfileSelect 
                     </div>
                   </div>
                   <div className="profile-actions">
+                    {profile.modLoader?.type === 'fabric' && (
+                      <button
+                        className="profile-action-btn manage-mods"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleManageMods(profile);
+                        }}
+                        title="Manage Mods"
+                      >
+                        🔧
+                      </button>
+                    )}
                     <button
                       className="profile-action-btn edit"
                       onClick={(e) => {
@@ -216,6 +362,20 @@ export const ProfileManager: React.FC<ProfileManagerProps> = ({ onProfileSelect 
             setEditingProfile(null);
           }}
           onSave={loadProfiles}
+        />
+      )}
+
+      {showFabricForm && (
+        <FabricProfileForm
+          onClose={() => setShowFabricForm(false)}
+          onSave={handleCreateFabricProfile}
+        />
+      )}
+
+      {showForgeForm && (
+        <ForgeProfileCreator
+          onClose={() => setShowForgeForm(false)}
+          onSave={handleCreateForgeProfile}
         />
       )}
     </div>
@@ -472,6 +632,183 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ profile, onClose, onSave }) =
             </button>
             <button type="submit" className="submit-btn" disabled={isSaving}>
               {isSaving ? 'Saving...' : profile ? 'Update' : 'Create'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+interface FabricProfileFormProps {
+  onClose: () => void;
+  onSave: (profileData: any) => void;
+}
+
+const FabricProfileForm: React.FC<FabricProfileFormProps> = ({ onClose, onSave }) => {
+  const [name, setName] = useState('');
+  const [versionId, setVersionId] = useState('1.20.1');
+  const [installationDir, setInstallationDir] = useState('');
+  const [memoryMin, setMemoryMin] = useState(2048);
+  const [memoryMax, setMemoryMax] = useState(4096);
+  const [jvmArgs, setJvmArgs] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!name.trim()) {
+      setError('Profile name is required');
+      return;
+    }
+
+    if (!versionId.trim()) {
+      setError('Version is required');
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      setError(null);
+
+      const profileData = {
+        name: name.trim(),
+        versionId: versionId.trim(),
+        installationDir: installationDir.trim() || undefined,
+        memoryMin,
+        memoryMax,
+        jvmArgs: jvmArgs.trim(),
+        modLoader: {
+          type: 'fabric' as const,
+          version: 'latest'
+        }
+      };
+
+      await onSave(profileData);
+    } catch (err) {
+      console.error('Failed to create Fabric profile:', err);
+      setError(err instanceof Error ? err.message : 'Failed to create Fabric profile');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="profile-form-overlay">
+      <div className="profile-form fabric-profile-form">
+        <div className="profile-form-header">
+          <h3>Create Fabric Profile</h3>
+          <button className="close-btn" onClick={onClose}>×</button>
+        </div>
+
+        <div className="fabric-info">
+          <p>🧵 This will create a Fabric profile with 10 essential mods preinstalled:</p>
+          <ul>
+            <li>Fabric API (Required)</li>
+            <li>Sodium (Performance)</li>
+            <li>Lithium (Optimization)</li>
+            <li>GammaUtil (Brightness)</li>
+            <li>AppleSkin (Food info)</li>
+            <li>Litematica (Schematics)</li>
+            <li>Krypton (Network)</li>
+            <li>Mod Menu (Configuration)</li>
+            <li>Uku's Armor HUD (Armor display)</li>
+            <li>Cloth Config (Mod settings)</li>
+          </ul>
+          <p>You can enable/disable individual mods when launching the game.</p>
+        </div>
+
+        {error && (
+          <div className="form-error">
+            <p>❌ {error}</p>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label>Profile Name *</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="My Fabric Profile"
+              required
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Minecraft Version *</label>
+            <input
+              type="text"
+              value={versionId}
+              onChange={(e) => setVersionId(e.target.value)}
+              placeholder="1.20.1"
+              required
+            />
+            <p className="form-hint">
+              Make sure this version is compatible with Fabric
+            </p>
+          </div>
+
+          <div className="form-group">
+            <label>Installation Directory</label>
+            <input
+              type="text"
+              value={installationDir}
+              onChange={(e) => setInstallationDir(e.target.value)}
+              placeholder="Leave empty for default"
+            />
+          </div>
+
+          <div className="form-group">
+            <label>Memory Allocation (MB)</label>
+            <div className="memory-inputs">
+              <div className="input-group">
+                <label>Min</label>
+                <input
+                  type="number"
+                  value={memoryMin}
+                  onChange={(e) => setMemoryMin(Number(e.target.value))}
+                  min="512"
+                  step="512"
+                />
+              </div>
+              <div className="input-group">
+                <label>Max</label>
+                <input
+                  type="number"
+                  value={memoryMax}
+                  onChange={(e) => setMemoryMax(Number(e.target.value))}
+                  min="1024"
+                  step="512"
+                />
+              </div>
+            </div>
+            <p className="form-hint">
+              Recommended: 4GB+ for modded Minecraft
+            </p>
+          </div>
+
+          <div className="form-group">
+            <label>JVM Arguments</label>
+            <textarea
+              value={jvmArgs}
+              onChange={(e) => setJvmArgs(e.target.value)}
+              placeholder="-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions"
+              rows={2}
+            />
+            <p className="form-hint">
+              Optional: Performance tuning arguments
+            </p>
+          </div>
+
+          <div className="form-actions">
+            <button type="button" className="cancel-btn" onClick={onClose}>
+              Cancel
+            </button>
+            <button type="submit" className="submit-btn" disabled={isSaving}>
+              {isSaving ? 'Creating Profile & Installing Mods...' : 'Create Fabric Profile'}
             </button>
           </div>
         </form>

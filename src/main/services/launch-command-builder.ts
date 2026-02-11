@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs';
 import { UserProfile, VersionMetadata, LibraryInfo, AuthenticationData } from '../models';
 
 export interface LaunchCommand {
@@ -197,8 +198,8 @@ export class LaunchCommandBuilder {
     if (profile.modLoader) {
       switch (profile.modLoader.type) {
         case 'forge':
-          // Forge typically uses its own main class
-          return 'net.minecraftforge.fml.loading.FMLClientLaunchProvider';
+          // Forge main class depends on Minecraft version
+          return this.getForgeMainClass(versionMetadata.id);
         
         case 'fabric':
           // Fabric uses its own launcher
@@ -219,6 +220,39 @@ export class LaunchCommandBuilder {
   }
 
   /**
+   * Get the correct Forge main class based on Minecraft version
+   */
+  private getForgeMainClass(minecraftVersion: string): string {
+    // Extract base version from modded versions (e.g., "1.12.2-forge-14.23.5.2847" -> "1.12.2")
+    let baseVersion = minecraftVersion;
+    if (minecraftVersion.includes('-')) {
+      const parts = minecraftVersion.split('-');
+      baseVersion = parts[0];
+    }
+    
+    // Parse version numbers
+    const versionParts = baseVersion.split('.');
+    if (versionParts.length >= 2) {
+      const major = parseInt(versionParts[0], 10);
+      const minor = parseInt(versionParts[1], 10);
+      const patch = versionParts.length >= 3 ? parseInt(versionParts[2], 10) : 0;
+      
+      // Minecraft 1.13+ uses the new Forge launcher
+      if (major === 1 && minor >= 13) {
+        return 'net.minecraftforge.fml.loading.FMLClientLaunchProvider';
+      }
+      
+      // Minecraft 1.12.2 and earlier use the legacy Forge launcher
+      if (major === 1 && minor <= 12) {
+        return 'net.minecraft.launchwrapper.Launch';
+      }
+    }
+    
+    // Default to legacy launcher for unknown versions
+    return 'net.minecraft.launchwrapper.Launch';
+  }
+
+  /**
    * Build JVM arguments including memory settings and profile-specific args
    */
   private buildJvmArguments(config: LaunchConfiguration): string[] {
@@ -230,9 +264,16 @@ export class LaunchCommandBuilder {
     args.push(`-Xmx${profile.memoryMax}M`);
 
     // Default JVM arguments for Minecraft
-    args.push('-Djava.library.path=' + config.nativesDirectory);
+    args.push(`-Djava.library.path=${config.nativesDirectory}`);
     args.push('-Dminecraft.launcher.brand=minecraft-launcher');
     args.push('-Dminecraft.launcher.version=1.0.0');
+
+    // For older Minecraft versions (1.8.9), ensure LWJGL can find natives
+    if (this.isLegacyMinecraftVersion(versionMetadata.id)) {
+      // Add additional library path arguments for LWJGL 2.9.x
+      args.push(`-Dorg.lwjgl.librarypath=${config.nativesDirectory}`);
+      args.push(`-Dnet.java.games.input.librarypath=${config.nativesDirectory}`);
+    }
 
     // Version-specific JVM arguments
     if (versionMetadata.arguments?.jvm) {
@@ -271,9 +312,12 @@ export class LaunchCommandBuilder {
     const { versionMetadata } = config;
     const classpathEntries: string[] = [];
 
-    // Add main game jar
+    // Get the Minecraft root directory (where versions are actually stored)
+    const minecraftRoot = this.getMinecraftRootDirectory(config.gameDirectory);
+
+    // Add main game jar (always in the root .minecraft/versions directory)
     const gameJarPath = path.join(
-      config.gameDirectory,
+      minecraftRoot,
       'versions',
       versionMetadata.id,
       `${versionMetadata.id}.jar`
@@ -324,31 +368,46 @@ export class LaunchCommandBuilder {
 
     // Add authentication arguments if not already present
     if (!args.includes('--username')) {
-      args.push('--username', authData.userProfile.name);
+      args.push('--username', this.escapeArgument(authData.userProfile.name));
     }
     if (!args.includes('--uuid')) {
-      args.push('--uuid', authData.userProfile.id);
+      args.push('--uuid', this.escapeArgument(authData.userProfile.id));
     }
     if (!args.includes('--accessToken')) {
-      args.push('--accessToken', authData.accessToken);
+      args.push('--accessToken', this.escapeArgument(authData.accessToken));
+    }
+
+    // For legacy versions (1.8.9), add user properties as empty JSON to prevent parsing issues
+    if (this.isLegacyMinecraftVersion(versionMetadata.id) && !args.includes('--userProperties')) {
+      args.push('--userProperties', '{}');
+    }
+
+    // Add user type
+    if (!args.includes('--userType')) {
+      args.push('--userType', 'mojang');
     }
 
     // Add game directory
     if (!args.includes('--gameDir')) {
-      args.push('--gameDir', config.gameDirectory);
+      args.push('--gameDir', this.escapePathArgument(config.gameDirectory));
     }
 
     // Add assets directory and index
     if (!args.includes('--assetsDir')) {
-      args.push('--assetsDir', config.assetsDirectory);
+      args.push('--assetsDir', this.escapePathArgument(config.assetsDirectory));
     }
     if (!args.includes('--assetIndex')) {
-      args.push('--assetIndex', versionMetadata.assets);
+      args.push('--assetIndex', this.escapeArgument(versionMetadata.assets));
     }
 
     // Add version info
     if (!args.includes('--version')) {
-      args.push('--version', versionMetadata.id);
+      args.push('--version', this.escapeArgument(versionMetadata.id));
+    }
+
+    // Add version type
+    if (!args.includes('--versionType')) {
+      args.push('--versionType', this.escapeArgument(versionMetadata.type));
     }
 
     // Mod loader specific game arguments
@@ -356,7 +415,43 @@ export class LaunchCommandBuilder {
       args.push(...this.getModLoaderGameArgs(profile.modLoader, config));
     }
 
+    // Validate arguments for potential JSON issues
+    this.validateGameArguments(args);
+
     return args;
+  }
+
+  /**
+   * Validate game arguments to prevent JSON parsing issues
+   */
+  private validateGameArguments(args: string[]): void {
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      
+      // Skip validation for valid JSON objects
+      if (arg === '{}' || arg === '[]') {
+        continue;
+      }
+      
+      // Check for potential JSON-like content that could cause issues
+      if (arg.includes('{') || arg.includes('}')) {
+        console.warn(`Potentially problematic argument detected: ${arg}`);
+        // Remove JSON-like characters
+        args[i] = arg.replace(/[{}]/g, '');
+      }
+      
+      // Check for line breaks or control characters
+      if (/[\r\n\t]/.test(arg)) {
+        console.warn(`Argument contains control characters: ${arg}`);
+        args[i] = arg.replace(/[\r\n\t]/g, '');
+      }
+      
+      // Ensure arguments don't start with invalid characters
+      if (arg.startsWith('{') || arg.startsWith('}')) {
+        console.warn(`Argument starts with JSON character: ${arg}`);
+        args[i] = arg.substring(1);
+      }
+    }
   }
 
   /**
@@ -397,18 +492,33 @@ export class LaunchCommandBuilder {
   ): string[] {
     let resolved = minecraftArguments;
     
-    // Replace common placeholders
-    resolved = resolved.replace(/\$\{auth_player_name\}/g, config.authData.userProfile.name);
-    resolved = resolved.replace(/\$\{version_name\}/g, config.versionMetadata.id);
-    resolved = resolved.replace(/\$\{game_directory\}/g, config.gameDirectory);
-    resolved = resolved.replace(/\$\{assets_root\}/g, config.assetsDirectory);
-    resolved = resolved.replace(/\$\{assets_index_name\}/g, config.versionMetadata.assets);
-    resolved = resolved.replace(/\$\{auth_uuid\}/g, config.authData.userProfile.id);
-    resolved = resolved.replace(/\$\{auth_access_token\}/g, config.authData.accessToken);
+    // Replace common placeholders with escaped values
+    resolved = resolved.replace(/\$\{auth_player_name\}/g, this.escapeArgument(config.authData.userProfile.name));
+    resolved = resolved.replace(/\$\{version_name\}/g, this.escapeArgument(config.versionMetadata.id));
+    resolved = resolved.replace(/\$\{game_directory\}/g, this.escapePathArgument(config.gameDirectory));
+    resolved = resolved.replace(/\$\{assets_root\}/g, this.escapePathArgument(config.assetsDirectory));
+    resolved = resolved.replace(/\$\{assets_index_name\}/g, this.escapeArgument(config.versionMetadata.assets));
+    resolved = resolved.replace(/\$\{auth_uuid\}/g, this.escapeArgument(config.authData.userProfile.id));
+    resolved = resolved.replace(/\$\{auth_access_token\}/g, this.escapeArgument(config.authData.accessToken));
     resolved = resolved.replace(/\$\{user_type\}/g, 'mojang');
-    resolved = resolved.replace(/\$\{version_type\}/g, config.versionMetadata.type);
+    resolved = resolved.replace(/\$\{version_type\}/g, this.escapeArgument(config.versionMetadata.type));
+    
+    // Handle user properties placeholder - provide empty JSON for legacy versions
+    resolved = resolved.replace(/\$\{user_properties\}/g, '{}');
 
-    return resolved.split(' ').filter(arg => arg.trim());
+    // Split arguments and filter out empty ones
+    const args = resolved.split(' ').filter(arg => arg.trim());
+    
+    // Validate each argument
+    return args.map(arg => {
+      // Only remove JSON characters if they're not part of a valid JSON object
+      if (arg === '{}') {
+        // Keep empty JSON object as-is
+        return arg;
+      }
+      // Remove any other potential JSON characters that could cause issues
+      return arg.replace(/[{}]/g, '').replace(/[\r\n\t]/g, '').trim();
+    }).filter(arg => arg.length > 0);
   }
 
   /**
@@ -417,30 +527,59 @@ export class LaunchCommandBuilder {
   private resolveArgumentPlaceholders(argument: string, config: LaunchConfiguration): string {
     let resolved = argument;
 
-    // Authentication placeholders
-    resolved = resolved.replace(/\$\{auth_player_name\}/g, config.authData.userProfile.name);
-    resolved = resolved.replace(/\$\{auth_uuid\}/g, config.authData.userProfile.id);
-    resolved = resolved.replace(/\$\{auth_access_token\}/g, config.authData.accessToken);
+    // Authentication placeholders - ensure proper escaping
+    resolved = resolved.replace(/\$\{auth_player_name\}/g, this.escapeArgument(config.authData.userProfile.name));
+    resolved = resolved.replace(/\$\{auth_uuid\}/g, this.escapeArgument(config.authData.userProfile.id));
+    resolved = resolved.replace(/\$\{auth_access_token\}/g, this.escapeArgument(config.authData.accessToken));
     resolved = resolved.replace(/\$\{user_type\}/g, 'mojang');
 
     // Version placeholders
-    resolved = resolved.replace(/\$\{version_name\}/g, config.versionMetadata.id);
-    resolved = resolved.replace(/\$\{version_type\}/g, config.versionMetadata.type);
+    resolved = resolved.replace(/\$\{version_name\}/g, this.escapeArgument(config.versionMetadata.id));
+    resolved = resolved.replace(/\$\{version_type\}/g, this.escapeArgument(config.versionMetadata.type));
 
-    // Directory placeholders
-    resolved = resolved.replace(/\$\{game_directory\}/g, config.gameDirectory);
-    resolved = resolved.replace(/\$\{assets_root\}/g, config.assetsDirectory);
-    resolved = resolved.replace(/\$\{assets_index_name\}/g, config.versionMetadata.assets);
+    // Directory placeholders - ensure proper path escaping
+    resolved = resolved.replace(/\$\{game_directory\}/g, this.escapePathArgument(config.gameDirectory));
+    resolved = resolved.replace(/\$\{assets_root\}/g, this.escapePathArgument(config.assetsDirectory));
+    resolved = resolved.replace(/\$\{assets_index_name\}/g, this.escapeArgument(config.versionMetadata.assets));
 
     // Library path placeholder
-    resolved = resolved.replace(/\$\{library_directory\}/g, config.librariesDirectory);
-    resolved = resolved.replace(/\$\{natives_directory\}/g, config.nativesDirectory);
+    resolved = resolved.replace(/\$\{library_directory\}/g, this.escapePathArgument(config.librariesDirectory));
+    resolved = resolved.replace(/\$\{natives_directory\}/g, this.escapePathArgument(config.nativesDirectory));
 
     // Launcher placeholders
     resolved = resolved.replace(/\$\{launcher_name\}/g, 'minecraft-launcher');
     resolved = resolved.replace(/\$\{launcher_version\}/g, '1.0.0');
 
     return resolved;
+  }
+
+  /**
+   * Escape argument values to prevent JSON parsing issues
+   */
+  private escapeArgument(value: string): string {
+    if (!value) return '';
+    
+    // Remove any characters that could cause JSON parsing issues
+    return value
+      .replace(/[\r\n\t]/g, '') // Remove line breaks and tabs
+      .replace(/[{}]/g, '') // Remove curly braces that could be interpreted as JSON
+      .trim();
+  }
+
+  /**
+   * Escape path arguments for Windows compatibility
+   */
+  private escapePathArgument(path: string): string {
+    if (!path) return '';
+    
+    // On Windows, ensure paths with spaces are handled correctly
+    // Convert forward slashes to backslashes for consistency
+    let escapedPath = path.replace(/\//g, '\\');
+    
+    // Remove any characters that could cause issues
+    escapedPath = escapedPath.replace(/[\r\n\t]/g, '').trim();
+    
+    return escapedPath;
   }
 
   /**
@@ -495,6 +634,24 @@ export class LaunchCommandBuilder {
   }
 
   /**
+   * Get the root Minecraft directory from an installation path
+   * Handles both root .minecraft and profile-specific subdirectories
+   */
+  private getMinecraftRootDirectory(installationDir: string): string {
+    // If the path contains 'profiles', extract the root .minecraft directory
+    if (installationDir.includes(path.sep + 'profiles' + path.sep)) {
+      const parts = installationDir.split(path.sep);
+      const profilesIndex = parts.indexOf('profiles');
+      if (profilesIndex > 0) {
+        return parts.slice(0, profilesIndex).join(path.sep);
+      }
+    }
+    
+    // If it's already the root directory or doesn't contain profiles, return as-is
+    return installationDir;
+  }
+
+  /**
    * Check if library should be included based on rules
    */
   private shouldIncludeLibrary(library: LibraryInfo): boolean {
@@ -526,14 +683,16 @@ export class LaunchCommandBuilder {
    * Get library file path
    */
   private getLibraryPath(library: LibraryInfo, librariesDir: string): string | null {
-    if (!library.downloads.artifact) {
-      return null;
+    // Parse library name (e.g., "org.lwjgl:lwjgl:3.2.2" or "org.ow2.asm:asm:9.7")
+    const nameParts = library.name.split(':');
+    if (nameParts.length < 3) {
+      return null; // Invalid library name format
     }
-
-    // Parse library name (e.g., "org.lwjgl:lwjgl:3.2.2")
-    const [group, name, version] = library.name.split(':');
+    
+    const [group, name, version] = nameParts;
     const groupPath = group.replace(/\./g, path.sep);
     
+    // Construct the standard Maven repository path
     return path.join(
       librariesDir,
       groupPath,
@@ -587,10 +746,17 @@ export class LaunchCommandBuilder {
 
     switch (modLoader.type) {
       case 'forge':
-        // Forge typically modifies the main class and arguments through its installer
-        // Add any Forge-specific game arguments here
-        args.push('--fml.forgeVersion', modLoader.version);
-        args.push('--fml.mcVersion', config.versionMetadata.id);
+        // Forge arguments depend on Minecraft version
+        const isLegacyForge = this.isLegacyForgeVersion(config.versionMetadata.id);
+        
+        if (isLegacyForge) {
+          // Legacy Forge (1.12.2 and earlier) uses LaunchWrapper
+          args.push('--tweakClass', 'net.minecraftforge.fml.common.launcher.FMLTweaker');
+        } else {
+          // Modern Forge (1.13+) uses FML loading
+          args.push('--fml.forgeVersion', modLoader.version);
+          args.push('--fml.mcVersion', config.versionMetadata.id);
+        }
         break;
       
       case 'fabric':
@@ -608,6 +774,32 @@ export class LaunchCommandBuilder {
   }
 
   /**
+   * Check if this Minecraft version uses legacy Forge (LaunchWrapper)
+   */
+  private isLegacyForgeVersion(minecraftVersion: string): boolean {
+    // Extract base version from modded versions
+    let baseVersion = minecraftVersion;
+    if (minecraftVersion.includes('-')) {
+      const parts = minecraftVersion.split('-');
+      baseVersion = parts[0];
+    }
+    
+    // Parse version numbers
+    const versionParts = baseVersion.split('.');
+    if (versionParts.length >= 2) {
+      const major = parseInt(versionParts[0], 10);
+      const minor = parseInt(versionParts[1], 10);
+      
+      // Minecraft 1.12.2 and earlier use legacy Forge
+      if (major === 1 && minor <= 12) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+
+  /**
    * Get mod loader specific classpath entries
    */
   private getModLoaderClasspath(
@@ -616,19 +808,46 @@ export class LaunchCommandBuilder {
   ): string[] {
     const classpathEntries: string[] = [];
 
-    // Add mod loader libraries to classpath
-    const modLoaderLibrariesDir = path.join(config.librariesDirectory, 'net');
-    
     switch (modLoader.type) {
       case 'forge':
-        // Forge libraries are typically in libraries directory under net/minecraftforge
-        const forgeLibraryPath = path.join(
-          config.librariesDirectory,
-          'net', 'minecraftforge', 'forge',
-          `${config.versionMetadata.id}-${modLoader.version}`,
-          `forge-${config.versionMetadata.id}-${modLoader.version}.jar`
+        // For Forge, we need to read the Forge JSON profile to get the correct libraries
+        // Modern Forge installations define their libraries in the JSON profile
+        const mcVersion = config.versionMetadata.id.split('-')[0]; // Extract base version like "1.12.2"
+        const forgeProfilePath = path.join(
+          this.getMinecraftRootDirectory(config.gameDirectory),
+          'versions',
+          `${mcVersion}-forge-${modLoader.version}`,
+          `${mcVersion}-forge-${modLoader.version}.json`
         );
-        classpathEntries.push(forgeLibraryPath);
+        
+        try {
+          // Read the Forge profile JSON to get the libraries
+          const forgeProfileData = JSON.parse(fs.readFileSync(forgeProfilePath, 'utf8'));
+          
+          // Add all libraries from the Forge profile
+          if (forgeProfileData.libraries) {
+            for (const library of forgeProfileData.libraries) {
+              if (this.shouldIncludeLibrary(library)) {
+                const libraryPath = this.getLibraryPath(library, config.librariesDirectory);
+                if (libraryPath) {
+                  classpathEntries.push(libraryPath);
+                }
+              }
+            }
+          }
+          
+          console.log(`Added ${classpathEntries.length} Forge libraries to classpath`);
+        } catch (error) {
+          console.error(`Failed to read Forge profile: ${forgeProfilePath}`, error);
+          // Fallback to old method if JSON reading fails
+          const forgeLibraryPath = path.join(
+            config.librariesDirectory,
+            'net', 'minecraftforge', 'forge',
+            `${config.versionMetadata.id}-${modLoader.version}`,
+            `forge-${config.versionMetadata.id}-${modLoader.version}.jar`
+          );
+          classpathEntries.push(forgeLibraryPath);
+        }
         break;
       
       case 'fabric':
@@ -758,5 +977,30 @@ export class LaunchCommandBuilder {
       default:
         return false;
     }
+  }
+
+  /**
+   * Check if this is a legacy Minecraft version that needs special LWJGL handling
+   */
+  private isLegacyMinecraftVersion(versionId: string): boolean {
+    // Extract base version from modded versions
+    let baseVersion = versionId;
+    if (versionId.includes('-')) {
+      const parts = versionId.split('-');
+      baseVersion = parts[0];
+    }
+    
+    // Minecraft 1.12.2 and earlier use LWJGL 2.9.x
+    const versionParts = baseVersion.split('.');
+    if (versionParts.length >= 2) {
+      const major = parseInt(versionParts[0], 10);
+      const minor = parseInt(versionParts[1], 10);
+      
+      if (major === 1 && minor <= 12) {
+        return true;
+      }
+    }
+    
+    return false;
   }
 }

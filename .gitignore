@@ -56,9 +56,11 @@ out/
 # Temporary files
 *.tmp
 *.temp
-#
- JRE downloads and extracted files
+# JRE downloads and extracted files
 downloads/
 resources/runtimes/*.7z
 resources/runtimes/*.zip
 resources/runtimes/manifest.json
+
+# Test directories with large files
+test-extract/

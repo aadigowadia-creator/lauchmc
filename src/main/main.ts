@@ -1,10 +1,12 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import * as path from 'path';
+import { promises as fs } from 'fs';
 import { initializeDatabase } from './database';
 import { ProfileRepository } from './repositories';
 import { AuthService, GameProcessManager } from './services';
 import { ModLoaderService } from './services/mod-loader-service';
 import { ProfileService } from './services/profile-service';
+import { FabricModService, ModDownloadProgress } from './services/fabric-mod-service';
 import { VersionManager } from './services/version-manager';
 import { LoggerService } from './services/logger-service';
 import { AutoUpdaterService } from './services/auto-updater-service';
@@ -18,6 +20,14 @@ class MinecraftLauncher {
   }
 
   private initializeApp(): void {
+    // Set app name for Task Manager (works in both dev and production)
+    app.setName('Hello World Launcher');
+    
+    // On Windows, set the app user model ID to change Task Manager display name
+    if (process.platform === 'win32') {
+      app.setAppUserModelId('Hello World Launcher');
+    }
+    
     // Handle app ready event
     app.whenReady().then(async () => {
       try {
@@ -173,6 +183,7 @@ class MinecraftLauncher {
 		const gameProcessManager = GameProcessManager.getInstance();
 		const modLoaderService = new ModLoaderService();
 		const profileService = new ProfileService();
+		const fabricModService = new FabricModService();
 		const versionManager = new VersionManager();
 		const logger = LoggerService.getInstance();
 		const bundledJavaService = BundledJavaService.getInstance();
@@ -350,7 +361,7 @@ class MinecraftLauncher {
     ipcMain.handle('game:launch', async (_, options: { profileId: number }) => {
       try {
         // Get the profile
-        const profile = await profileService.getProfileById(options.profileId);
+        let profile = await profileService.getProfileById(options.profileId);
         if (!profile) {
           throw new Error(`Profile with ID ${options.profileId} not found`);
         }
@@ -365,6 +376,64 @@ class MinecraftLauncher {
         const validAuthData = await authService.validateSession();
         if (!validAuthData) {
           throw new Error('Authentication session expired. Please log in again.');
+        }
+
+        // Fix version ID for Fabric profiles if needed
+        // (handles profiles created before the version ID fix)
+        if (profile.modLoader?.type === 'fabric') {
+          let fabricLoaderVersion = profile.modLoader.version;
+          
+          // Extract base game version from current version ID
+          let baseGameVersion = profile.versionId;
+          if (profile.versionId.startsWith('fabric-loader-')) {
+            // Extract from fabric version ID: fabric-loader-X.X.X-1.21.5 -> 1.21.5
+            const match = profile.versionId.match(/^fabric-loader-.+-(.+)$/);
+            if (match) {
+              baseGameVersion = match[1];
+            }
+          }
+          
+          // Resolve "latest" to actual installed version
+          if (fabricLoaderVersion === 'latest') {
+            const installedModLoaders = await modLoaderService.getInstalledModLoaders(profile.installationDir);
+            const fabricLoader = installedModLoaders.find(ml => 
+              ml.type === 'fabric' && ml.gameVersion === baseGameVersion
+            );
+            
+            if (fabricLoader) {
+              fabricLoaderVersion = fabricLoader.version;
+              console.log(`Resolved Fabric loader version from "latest" to ${fabricLoaderVersion}`);
+              
+              // Update the profile with the resolved version
+              await profileService.updateProfile(profile.id!, {
+                modLoader: {
+                  type: 'fabric',
+                  version: fabricLoaderVersion
+                }
+              });
+            } else {
+              throw new Error('Fabric loader not installed. Please reinstall the Fabric mod loader.');
+            }
+          }
+          
+          const expectedFabricVersionId = `fabric-loader-${fabricLoaderVersion}-${baseGameVersion}`;
+          
+          // Check if the version ID needs to be updated
+          if (profile.versionId !== expectedFabricVersionId) {
+            console.log(`Fixing Fabric profile version ID from ${profile.versionId} to ${expectedFabricVersionId}`);
+            
+            // Update the profile with the correct version ID
+            await profileService.updateProfile(profile.id!, {
+              versionId: expectedFabricVersionId
+            });
+            
+            // Reload the profile with the updated version ID
+            const updatedProfile = await profileService.getProfileById(profile.id!);
+            if (!updatedProfile) {
+              throw new Error('Failed to reload profile after version ID update');
+            }
+            profile = updatedProfile;
+          }
         }
 
         // Get version metadata
@@ -383,6 +452,52 @@ class MinecraftLauncher {
         return await gameProcessManager.launchGame(launchOptions);
       } catch (error) {
         console.error('Failed to launch game:', error);
+        throw error;
+      }
+    });
+
+    // Launch game as vanilla (ignoring mod loader configuration)
+    ipcMain.handle('game:launchVanilla', async (_, options: { profileId: number }) => {
+      try {
+        // Get the profile
+        const profile = await profileService.getProfileById(options.profileId);
+        if (!profile) {
+          throw new Error(`Profile with ID ${options.profileId} not found`);
+        }
+
+        // Get authentication data
+        const authData = authService.getStoredAuthData();
+        if (!authData) {
+          throw new Error('User not authenticated. Please log in first.');
+        }
+
+        // Validate session and refresh if needed
+        const validAuthData = await authService.validateSession();
+        if (!validAuthData) {
+          throw new Error('Authentication session expired. Please log in again.');
+        }
+
+        // Get version metadata for the base game version (not modded)
+        const baseVersionId = profile.versionId.split('-')[0]; // Extract base version (e.g., "1.12.2" from "1.12.2-forge-...")
+        const versionMetadata = await versionManager.getVersionMetadata(baseVersionId);
+        if (!versionMetadata) {
+          throw new Error(`Version metadata for ${baseVersionId} not found`);
+        }
+
+        // Construct launch options for vanilla
+        const launchOptions = {
+          profile: {
+            ...profile,
+            versionId: baseVersionId, // Use base version ID
+            modLoader: undefined // Remove mod loader
+          },
+          versionMetadata,
+          authData: validAuthData
+        };
+
+        return await gameProcessManager.launchVanilla(launchOptions);
+      } catch (error) {
+        console.error('Failed to launch vanilla game:', error);
         throw error;
       }
     });
@@ -428,6 +543,27 @@ class MinecraftLauncher {
         return gameProcessManager.getCrashHistory();
       } catch (error) {
         console.error('Failed to get crash history:', error);
+        throw error;
+      }
+    });
+
+    // LWJGL troubleshooting IPC handlers
+    ipcMain.handle('game:clearNatives', async (_, installationDir: string, versionId: string) => {
+      try {
+        await gameProcessManager.clearNativesDirectory(installationDir, versionId);
+        return { success: true, message: 'Natives directory cleared successfully' };
+      } catch (error) {
+        console.error('Failed to clear natives directory:', error);
+        throw error;
+      }
+    });
+
+    ipcMain.handle('game:forceNativesReextraction', async (_, profileId: number) => {
+      try {
+        await gameProcessManager.forceNativesReextraction(profileId);
+        return { success: true, message: 'Natives will be re-extracted on next launch' };
+      } catch (error) {
+        console.error('Failed to force natives re-extraction:', error);
         throw error;
       }
     });
@@ -708,6 +844,585 @@ class MinecraftLauncher {
 				};
 			} catch (error) {
 				console.error('Failed to get runtime status:', error);
+				throw error;
+			}
+		});
+
+		// Fabric mod management IPC handlers
+		ipcMain.handle('profiles:createFabricProfile', async (_, profileData) => {
+			try {
+				// Set up progress event forwarding
+				const progressHandler = (progress: ModDownloadProgress) => {
+					this.mainWindow?.webContents.send('mods:installProgress', progress);
+				};
+				
+				return await profileService.createFabricProfile(profileData, progressHandler);
+			} catch (error) {
+				console.error('Failed to create Fabric profile:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('mods:installEssentialMods', async (_, profileId: number, gameVersion: string) => {
+			try {
+				// Get profile to retrieve installation directory
+				const profile = await profileService.getProfileById(profileId);
+				if (!profile) {
+					throw new Error('Profile not found');
+				}
+				
+				// Set up progress event forwarding
+				const progressHandler = (progress: ModDownloadProgress) => {
+					this.mainWindow?.webContents.send('mods:installProgress', progress);
+				};
+				
+				await fabricModService.installEssentialMods(
+					profileId,
+					gameVersion,
+					profile.installationDir,
+					progressHandler
+				);
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to install essential mods:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('mods:getAllMods', async (_, profileId: number) => {
+			try {
+				return await fabricModService.getAllMods(profileId);
+			} catch (error) {
+				console.error('Failed to get all mods:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('mods:getModStates', async (_, profileId: number) => {
+			try {
+				const modStates = await fabricModService.getModStates(profileId);
+				// Convert Map to object for JSON serialization
+				return Object.fromEntries(modStates);
+			} catch (error) {
+				console.error('Failed to get mod states:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('mods:setModState', async (_, profileId: number, modId: string, enabled: boolean) => {
+			try {
+				await fabricModService.setModState(profileId, modId, enabled);
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to set mod state:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('mods:addCustomMod', async (_, profileId: number, url: string) => {
+			try {
+				// Get profile to retrieve game version and installation directory
+				const profile = await profileService.getProfileById(profileId);
+				if (!profile) {
+					throw new Error('Profile not found');
+				}
+				
+				// Set up progress event forwarding
+				const progressHandler = (progress: ModDownloadProgress) => {
+					this.mainWindow?.webContents.send('mods:installProgress', progress);
+				};
+				
+				return await fabricModService.addCustomMod(
+					profileId, 
+					url, 
+					profile.versionId,
+					profile.installationDir,
+					progressHandler
+				);
+			} catch (error) {
+				console.error('Failed to add custom mod:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('mods:removeCustomMod', async (_, profileId: number, modId: string) => {
+			try {
+				// Get profile to retrieve installation directory
+				const profile = await profileService.getProfileById(profileId);
+				if (!profile) {
+					throw new Error('Profile not found');
+				}
+				
+				await fabricModService.removeCustomMod(profileId, modId, profile.installationDir);
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to remove custom mod:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('mods:getProfilePreference', async (_, profileId: number, key: string) => {
+			try {
+				return await profileService.getProfilePreference(profileId, key);
+			} catch (error) {
+				console.error('Failed to get profile preference:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('mods:setProfilePreference', async (_, profileId: number, key: string, value: any) => {
+			try {
+				await profileService.setProfilePreference(profileId, key, value);
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to set profile preference:', error);
+				throw error;
+			}
+		});
+
+		// Forge profile creation handler
+		ipcMain.handle('profiles:createForgeProfile', async (_, profileData, enableOptiFine: boolean = true) => {
+			try {
+				// Set up progress event forwarding
+				const progressHandler = (progress: { stage: string; percentage: number; message?: string }) => {
+					this.mainWindow?.webContents.send('mods:installProgress', progress);
+				};
+				
+				return await profileService.createForgeProfile(profileData, enableOptiFine, progressHandler);
+			} catch (error) {
+				console.error('Failed to create Forge profile:', error);
+				throw error;
+			}
+		});
+
+		// Forge mod management IPC handlers
+		ipcMain.handle('forgeMods:getModStates', async (_, profileId: number) => {
+			try {
+				const { ForgeModService } = await import('./services/forge-mod-service');
+				const forgeModService = new ForgeModService();
+				return await forgeModService.getModStates(profileId.toString());
+			} catch (error) {
+				console.error('Failed to get Forge mod states:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeMods:updateModState', async (_, profileId: number, modName: string, enabled: boolean) => {
+			try {
+				const { ForgeModService } = await import('./services/forge-mod-service');
+				const forgeModService = new ForgeModService();
+				await forgeModService.updateModState(profileId.toString(), modName, enabled);
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to update Forge mod state:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeMods:applyModStates', async (_, profileId: number) => {
+			try {
+				const { ForgeModService } = await import('./services/forge-mod-service');
+				const forgeModService = new ForgeModService();
+				await forgeModService.applyModStates(profileId.toString());
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to apply Forge mod states:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeMods:getStatistics', async (_, profileId: number) => {
+			try {
+				const { ForgeModService } = await import('./services/forge-mod-service');
+				const forgeModService = new ForgeModService();
+				return await forgeModService.getModStateStatistics(profileId.toString());
+			} catch (error) {
+				console.error('Failed to get Forge mod statistics:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeMods:scanDirectory', async (_, profileId: number, modsDirectory: string) => {
+			try {
+				const { ForgeModService } = await import('./services/forge-mod-service');
+				const forgeModService = new ForgeModService();
+				await forgeModService.scanAndUpdateModStates(profileId.toString(), modsDirectory);
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to scan Forge mods directory:', error);
+				throw error;
+			}
+		});
+
+		// Java detection for Forge installer
+		ipcMain.handle('forge:checkJava', async () => {
+			try {
+				const { JavaService } = await import('./services/java-service');
+				const javaService = JavaService.getInstance();
+				const javaInstallation = await javaService.getBestJavaInstallation('1.12.2');
+				
+				if (javaInstallation) {
+					return {
+						available: true,
+						path: javaInstallation.path,
+						version: javaInstallation.version,
+						majorVersion: javaInstallation.majorVersion
+					};
+				} else {
+					return {
+						available: false,
+						message: 'No compatible Java installation found. Please install Java 8 or later.'
+					};
+				}
+			} catch (error) {
+				console.error('Failed to check Java:', error);
+				return {
+					available: false,
+					message: `Java check failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+				};
+			}
+		});
+
+		// Forge installer IPC handlers
+		ipcMain.handle('forge:getAvailableVersions', async (_, mcVersion: string) => {
+			try {
+				const { ForgeInstaller } = await import('./services/forge-installer');
+				const installer = new ForgeInstaller();
+				return await installer.getAvailableVersions(mcVersion);
+			} catch (error) {
+				console.error('Failed to get available Forge versions:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forge:getRecommendedVersion', async (_, mcVersion: string) => {
+			try {
+				const { ForgeInstaller } = await import('./services/forge-installer');
+				const installer = new ForgeInstaller();
+				return await installer.getRecommendedVersion(mcVersion);
+			} catch (error) {
+				console.error('Failed to get recommended Forge version:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forge:isInstalled', async (_, mcVersion: string, forgeVersion: string, minecraftDir: string) => {
+			try {
+				const { ForgeInstaller } = await import('./services/forge-installer');
+				const installer = new ForgeInstaller();
+				return await installer.isForgeInstalled(mcVersion, forgeVersion, minecraftDir);
+			} catch (error) {
+				console.error('Failed to check Forge installation:', error);
+				return false;
+			}
+		});
+
+		ipcMain.handle('forge:install', async (_, mcVersion: string, forgeVersion: string, minecraftDir: string) => {
+			try {
+				const { ForgeInstaller } = await import('./services/forge-installer');
+				const installer = new ForgeInstaller();
+				
+				return new Promise((resolve, reject) => {
+					installer.installForge(mcVersion, forgeVersion, minecraftDir, (progress: any) => {
+						// Send progress updates to renderer
+						this.mainWindow?.webContents.send('forge:installProgress', progress);
+					}).then(resolve).catch(reject);
+				});
+			} catch (error) {
+				console.error('Failed to install Forge:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forge:updateProfileVersion', async (_, profileId: number, newVersionId: string) => {
+			try {
+				const updatedProfile = await profileService.updateProfile(profileId, {
+					versionId: newVersionId
+				});
+				return updatedProfile;
+			} catch (error) {
+				console.error('Failed to update profile version:', error);
+				throw error;
+			}
+		});
+
+		// Forge settings IPC handlers
+		ipcMain.handle('forgeSettings:getOptiFineSettings', async () => {
+			try {
+				const { ForgeSettingsService } = await import('./services/forge-settings-service');
+				const forgeSettingsService = new ForgeSettingsService();
+				return await forgeSettingsService.getOptiFineSettings();
+			} catch (error) {
+				console.error('Failed to get OptiFine settings:', error);
+				throw error;
+			}
+		});
+
+		// OptiFine installation handler
+		ipcMain.handle('optifine:install', async (_, gameVersion: string, modsDirectory: string) => {
+			try {
+				const { OptiFineManager } = await import('./services/optifine-manager');
+				const optifineManager = new OptiFineManager();
+				
+				// Get available OptiFine versions for the game version
+				const availableVersions = await optifineManager.getAvailableVersions(gameVersion);
+				if (availableVersions.length === 0) {
+					throw new Error(`No OptiFine versions available for Minecraft ${gameVersion}`);
+				}
+				
+				// Use the first (recommended) version
+				const optifineVersion = availableVersions[0];
+				const targetPath = path.join(modsDirectory, optifineVersion.filename);
+				
+				// Check if OptiFine is already installed
+				try {
+					await fs.access(targetPath);
+					// Verify it's a valid OptiFine installation
+					const stats = await fs.stat(targetPath);
+					if (stats.size > 1024) { // More than 1KB, likely valid
+						return { 
+							success: true, 
+							message: `OptiFine ${optifineVersion.version} is already installed`,
+							version: optifineVersion.version,
+							path: targetPath
+						};
+					}
+				} catch {
+					// OptiFine not installed, proceed with download
+				}
+				
+				// Ensure mods directory exists
+				await fs.mkdir(modsDirectory, { recursive: true });
+				
+				try {
+					// Use the advanced download method with multiple mirror sources
+					console.log('Attempting OptiFine download with advanced mirror sources...');
+					await optifineManager.downloadOptiFineAdvanced(
+						optifineVersion,
+						targetPath,
+						(progress: any) => {
+							// Send progress updates to renderer
+							this.mainWindow?.webContents.send('optifine:downloadProgress', progress);
+						}
+					);
+					
+					return { 
+						success: true, 
+						message: `OptiFine ${optifineVersion.version} installed successfully via automatic download`,
+						version: optifineVersion.version,
+						path: targetPath
+					};
+				} catch (advancedError) {
+					console.log('Advanced download failed, trying fallback method...');
+					
+					// Fallback to original method
+					try {
+						const fallbackUrls = [
+							'https://optifine.net/downloadx?f=OptiFine_1.12.2_HD_U_E3.jar&x=1',
+							'https://optifine.net/downloadx?f=OptiFine_1.12.2_HD_U_E3.jar&x=2',
+						];
+						
+						await optifineManager.downloadOptiFineWithFallback(
+							optifineVersion,
+							targetPath,
+							fallbackUrls,
+							(progress: any) => {
+								this.mainWindow?.webContents.send('optifine:downloadProgress', progress);
+							}
+						);
+						
+						return { 
+							success: true, 
+							message: `OptiFine ${optifineVersion.version} installed successfully via fallback method`,
+							version: optifineVersion.version,
+							path: targetPath
+						};
+					} catch (fallbackError) {
+						// Both methods failed, try the alternative installation method
+						console.log('All download methods failed, creating installation guide...');
+						
+						try {
+							const guidePath = await optifineManager.installOptiFineAlternative(
+								optifineVersion,
+								targetPath,
+								(progress: any) => {
+									this.mainWindow?.webContents.send('optifine:downloadProgress', progress);
+								}
+							);
+							
+							// Return manual installation instructions with the guide
+							const manualInstructions = {
+								success: false,
+								requiresManualInstall: true,
+								message: `OptiFine installation guide created. Please follow the instructions:`,
+								instructions: [
+									`1. Visit https://optifine.net/downloads`,
+									`2. Download OptiFine ${optifineVersion.version} for Minecraft ${gameVersion}`,
+									`3. Place the JAR file in: ${modsDirectory}`,
+									`4. Restart launcher and launch the game`,
+									`5. Detailed guide created at: ${guidePath}`
+								],
+								downloadUrl: `https://optifine.net/downloads`,
+								targetDirectory: modsDirectory,
+								expectedFilename: optifineVersion.filename,
+								guidePath: guidePath,
+								error: 'Automatic download restricted by OptiFine licensing'
+							};
+							
+							return manualInstructions;
+						} catch (guideError) {
+							// Even guide creation failed, return basic manual instructions
+							const downloadError = advancedError;
+							
+							const manualInstructions = {
+								success: false,
+								requiresManualInstall: true,
+								message: `Automatic OptiFine download failed. Please install manually:`,
+								instructions: [
+									`1. Visit https://optifine.net/downloads`,
+									`2. Download OptiFine ${optifineVersion.version} for Minecraft ${gameVersion}`,
+									`3. Place the downloaded JAR file in: ${modsDirectory}`,
+									`4. Restart the launcher and try launching the game`
+								],
+								downloadUrl: `https://optifine.net/downloads`,
+								targetDirectory: modsDirectory,
+								expectedFilename: optifineVersion.filename,
+								error: downloadError instanceof Error ? downloadError.message : 'Unknown download error'
+							};
+							
+							return manualInstructions;
+						}
+					}
+				}
+			} catch (error) {
+				console.error('Failed to install OptiFine:', error);
+				throw error;
+			}
+		});
+
+		// System utilities
+		ipcMain.handle('system:openFolder', async (_, folderPath: string) => {
+			try {
+				const { shell } = await import('electron');
+				await shell.openPath(folderPath);
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to open folder:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeSettings:updateOptiFineSettings', async (_, settings) => {
+			try {
+				const { ForgeSettingsService } = await import('./services/forge-settings-service');
+				const forgeSettingsService = new ForgeSettingsService();
+				await forgeSettingsService.updateOptiFineSettings(settings);
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to update OptiFine settings:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeSettings:getModManagementSettings', async () => {
+			try {
+				const { ForgeSettingsService } = await import('./services/forge-settings-service');
+				const forgeSettingsService = new ForgeSettingsService();
+				return await forgeSettingsService.getModManagementSettings();
+			} catch (error) {
+				console.error('Failed to get mod management settings:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeSettings:updateModManagementSettings', async (_, settings) => {
+			try {
+				const { ForgeSettingsService } = await import('./services/forge-settings-service');
+				const forgeSettingsService = new ForgeSettingsService();
+				await forgeSettingsService.updateModManagementSettings(settings);
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to update mod management settings:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeSettings:getProfileSettings', async () => {
+			try {
+				const { ForgeSettingsService } = await import('./services/forge-settings-service');
+				const forgeSettingsService = new ForgeSettingsService();
+				return await forgeSettingsService.getProfileSettings();
+			} catch (error) {
+				console.error('Failed to get profile settings:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeSettings:updateProfileSettings', async (_, settings) => {
+			try {
+				const { ForgeSettingsService } = await import('./services/forge-settings-service');
+				const forgeSettingsService = new ForgeSettingsService();
+				await forgeSettingsService.updateProfileSettings(settings);
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to update profile settings:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeSettings:getAllForgeSettings', async () => {
+			try {
+				const { ForgeSettingsService } = await import('./services/forge-settings-service');
+				const forgeSettingsService = new ForgeSettingsService();
+				return await forgeSettingsService.getAllForgeSettings();
+			} catch (error) {
+				console.error('Failed to get all Forge settings:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeSettings:resetAllForgeSettings', async () => {
+			try {
+				const { ForgeSettingsService } = await import('./services/forge-settings-service');
+				const forgeSettingsService = new ForgeSettingsService();
+				await forgeSettingsService.resetAllSettings();
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to reset all Forge settings:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeSettings:exportSettings', async () => {
+			try {
+				const { ForgeSettingsService } = await import('./services/forge-settings-service');
+				const forgeSettingsService = new ForgeSettingsService();
+				return await forgeSettingsService.exportSettings();
+			} catch (error) {
+				console.error('Failed to export Forge settings:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeSettings:importSettings', async (_, jsonData: string) => {
+			try {
+				const { ForgeSettingsService } = await import('./services/forge-settings-service');
+				const forgeSettingsService = new ForgeSettingsService();
+				await forgeSettingsService.importSettings(jsonData);
+				return { success: true };
+			} catch (error) {
+				console.error('Failed to import Forge settings:', error);
+				throw error;
+			}
+		});
+
+		ipcMain.handle('forgeSettings:validateSettings', async () => {
+			try {
+				const { ForgeSettingsService } = await import('./services/forge-settings-service');
+				const forgeSettingsService = new ForgeSettingsService();
+				return await forgeSettingsService.validateSettings();
+			} catch (error) {
+				console.error('Failed to validate Forge settings:', error);
 				throw error;
 			}
 		});

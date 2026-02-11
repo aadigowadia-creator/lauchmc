@@ -43,7 +43,16 @@ export class VersionManager extends EventEmitter {
     super();
     this.cacheDir = join(app.getPath('userData'), 'cache');
     this.cacheFilePath = join(this.cacheDir, CACHE_FILE_NAME);
-    this.gameDir = join(app.getPath('userData'), 'minecraft');
+    
+    // Use the standard .minecraft directory instead of Electron's userData
+    const homeDir = app.getPath('home');
+    if (process.platform === 'win32') {
+      this.gameDir = join(homeDir, 'AppData', 'Roaming', '.minecraft');
+    } else if (process.platform === 'darwin') {
+      this.gameDir = join(homeDir, 'Library', 'Application Support', 'minecraft');
+    } else {
+      this.gameDir = join(homeDir, '.minecraft');
+    }
   }
 
   /**
@@ -143,13 +152,73 @@ export class VersionManager extends EventEmitter {
       
       // Read version metadata file
       const metadataContent = await fs.readFile(versionJsonPath, 'utf-8');
-      const metadata: VersionMetadata = JSON.parse(metadataContent);
+      const metadata: any = JSON.parse(metadataContent);
       
-      return metadata;
+      // Handle version inheritance (for Fabric, Forge, etc.)
+      if (metadata.inheritsFrom) {
+        const parentMetadata = await this.getVersionMetadata(metadata.inheritsFrom);
+        if (!parentMetadata) {
+          throw new Error(`Parent version ${metadata.inheritsFrom} not found for ${versionId}`);
+        }
+        
+        // Merge libraries with deduplication
+        // Child libraries override parent libraries with the same name
+        const childLibraries = metadata.libraries || [];
+        const parentLibraries = parentMetadata.libraries || [];
+        
+        // Create a map of child library names for quick lookup
+        const childLibraryNames = new Set(
+          childLibraries.map((lib: any) => this.getLibraryBaseName(lib.name))
+        );
+        
+        // Filter out parent libraries that are overridden by child libraries
+        const filteredParentLibraries = parentLibraries.filter(
+          (lib: any) => !childLibraryNames.has(this.getLibraryBaseName(lib.name))
+        );
+        
+        // Merge parent and child metadata
+        // Child properties override parent properties
+        const mergedMetadata: VersionMetadata = {
+          ...parentMetadata,
+          ...metadata,
+          // Merge libraries arrays (filtered parent libraries + child libraries)
+          libraries: [
+            ...filteredParentLibraries,
+            ...childLibraries
+          ],
+          // Merge arguments if both exist
+          arguments: metadata.arguments ? {
+            game: [
+              ...(parentMetadata.arguments?.game || []),
+              ...(metadata.arguments?.game || [])
+            ],
+            jvm: [
+              ...(parentMetadata.arguments?.jvm || []),
+              ...(metadata.arguments?.jvm || [])
+            ]
+          } : parentMetadata.arguments
+        };
+        
+        return mergedMetadata;
+      }
+      
+      return metadata as VersionMetadata;
     } catch (error) {
       console.error(`Failed to load version metadata for ${versionId}:`, error);
       return null;
     }
+  }
+
+  /**
+   * Get the base name of a library (without version)
+   * e.g., "org.ow2.asm:asm:9.6" -> "org.ow2.asm:asm"
+   */
+  private getLibraryBaseName(libraryName: string): string {
+    const parts = libraryName.split(':');
+    if (parts.length >= 2) {
+      return `${parts[0]}:${parts[1]}`;
+    }
+    return libraryName;
   }
 
   /**

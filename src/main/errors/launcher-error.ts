@@ -43,6 +43,28 @@ export enum ErrorCode {
   BUNDLED_JAVA_CORRUPTED = 'BUNDLED_JAVA_CORRUPTED',
   BUNDLED_JAVA_EXTRACTION_FAILED = 'BUNDLED_JAVA_EXTRACTION_FAILED',
   
+  // Mod management errors
+  MOD_DOWNLOAD_FAILED = 'MOD_DOWNLOAD_FAILED',
+  MOD_INTEGRITY_CHECK_FAILED = 'MOD_INTEGRITY_CHECK_FAILED',
+  MOD_VERSION_NOT_FOUND = 'MOD_VERSION_NOT_FOUND',
+  MOD_ALREADY_INSTALLED = 'MOD_ALREADY_INSTALLED',
+  MOD_NOT_FOUND = 'MOD_NOT_FOUND',
+  MOD_STATE_UPDATE_FAILED = 'MOD_STATE_UPDATE_FAILED',
+  MOD_DEPENDENCY_MISSING = 'MOD_DEPENDENCY_MISSING',
+  MOD_INCOMPATIBLE_VERSION = 'MOD_INCOMPATIBLE_VERSION',
+  MOD_INVALID_URL = 'MOD_INVALID_URL',
+  MOD_API_ERROR = 'MOD_API_ERROR',
+  
+  // Forge-specific errors
+  FORGE_INSTALL_FAILED = 'FORGE_INSTALL_FAILED',
+  FORGE_VERSION_INCOMPATIBLE = 'FORGE_VERSION_INCOMPATIBLE',
+  FORGE_PROFILE_CREATION_FAILED = 'FORGE_PROFILE_CREATION_FAILED',
+  OPTIFINE_DOWNLOAD_FAILED = 'OPTIFINE_DOWNLOAD_FAILED',
+  OPTIFINE_INCOMPATIBLE = 'OPTIFINE_INCOMPATIBLE',
+  OPTIFINE_INSTALL_FAILED = 'OPTIFINE_INSTALL_FAILED',
+  FORGE_MOD_STATE_FAILED = 'FORGE_MOD_STATE_FAILED',
+  FORGE_DIRECTORY_ACCESS_FAILED = 'FORGE_DIRECTORY_ACCESS_FAILED',
+  
   // Database errors
   DATABASE_ERROR = 'DATABASE_ERROR',
   
@@ -300,6 +322,309 @@ export class ErrorFactory {
           'Check if the launcher has write permissions',
           'Try deleting the database file (profiles will be lost)',
           'Contact support if the issue persists',
+        ],
+      },
+      originalError
+    );
+  }
+
+  static modDownloadFailed(modName: string, reason: string, originalError?: Error): LauncherError {
+    return new LauncherError(
+      ErrorCode.MOD_DOWNLOAD_FAILED,
+      `Failed to download ${modName}: ${reason}`,
+      {
+        message: `The mod "${modName}" could not be downloaded.`,
+        steps: [
+          'Check your internet connection',
+          'Verify the mod is available on the source platform',
+          'Try downloading the mod again',
+          'Check if the mod source (Modrinth/CurseForge) is operational',
+        ],
+      },
+      originalError
+    );
+  }
+
+  static modIntegrityCheckFailed(modName: string): LauncherError {
+    return new LauncherError(
+      ErrorCode.MOD_INTEGRITY_CHECK_FAILED,
+      `Integrity check failed for ${modName}`,
+      {
+        message: `The downloaded file for "${modName}" is corrupted or incomplete.`,
+        steps: [
+          'Try downloading the mod again',
+          'Check your internet connection stability',
+          'Verify you have enough disk space',
+          'Contact support if the issue persists',
+        ],
+      }
+    );
+  }
+
+  static modVersionNotFound(modName: string, gameVersion: string): LauncherError {
+    return new LauncherError(
+      ErrorCode.MOD_VERSION_NOT_FOUND,
+      `No compatible version found for ${modName}`,
+      {
+        message: `"${modName}" doesn't have a version compatible with Minecraft ${gameVersion}.`,
+        steps: [
+          'Check if the mod supports your Minecraft version',
+          'Try using a different Minecraft version',
+          'Look for alternative mods with similar functionality',
+          'Check the mod page for version compatibility information',
+        ],
+      }
+    );
+  }
+
+  static modAlreadyInstalled(modName: string): LauncherError {
+    return new LauncherError(
+      ErrorCode.MOD_ALREADY_INSTALLED,
+      `${modName} is already installed`,
+      {
+        message: `The mod "${modName}" is already installed in this profile.`,
+        steps: [
+          'Check your installed mods list',
+          'Remove the existing mod if you want to reinstall it',
+          'Try a different version of the mod',
+        ],
+      }
+    );
+  }
+
+  static modNotFound(modId: string): LauncherError {
+    return new LauncherError(
+      ErrorCode.MOD_NOT_FOUND,
+      `Mod not found: ${modId}`,
+      {
+        message: 'The requested mod could not be found.',
+        steps: [
+          'Verify the mod URL is correct',
+          'Check if the mod still exists on the platform',
+          'Try searching for the mod by name',
+        ],
+      }
+    );
+  }
+
+  static modStateUpdateFailed(modName: string, originalError?: Error): LauncherError {
+    return new LauncherError(
+      ErrorCode.MOD_STATE_UPDATE_FAILED,
+      `Failed to update state for ${modName}`,
+      {
+        message: `Could not enable/disable "${modName}".`,
+        steps: [
+          'Check if you have write permissions to the mods folder',
+          'Verify the mod file exists',
+          'Try restarting the launcher',
+          'Check if another program is using the mod file',
+        ],
+      },
+      originalError
+    );
+  }
+
+  static modDependencyMissing(modName: string, dependencies: string[]): LauncherError {
+    return new LauncherError(
+      ErrorCode.MOD_DEPENDENCY_MISSING,
+      `${modName} requires missing dependencies`,
+      {
+        message: `"${modName}" requires the following mods to be enabled: ${dependencies.join(', ')}`,
+        steps: [
+          'Enable the required dependency mods',
+          'Install missing dependencies if not present',
+          'Check the mod documentation for dependency information',
+        ],
+      }
+    );
+  }
+
+  static modIncompatibleVersion(modName: string, gameVersion: string): LauncherError {
+    return new LauncherError(
+      ErrorCode.MOD_INCOMPATIBLE_VERSION,
+      `${modName} is not compatible with Minecraft ${gameVersion}`,
+      {
+        message: `"${modName}" doesn't support Minecraft ${gameVersion}.`,
+        steps: [
+          'Check the mod page for supported versions',
+          'Try using a different Minecraft version',
+          'Look for an updated version of the mod',
+          'Consider using an alternative mod',
+        ],
+      }
+    );
+  }
+
+  static modInvalidUrl(url: string): LauncherError {
+    return new LauncherError(
+      ErrorCode.MOD_INVALID_URL,
+      'Invalid mod URL',
+      {
+        message: 'The provided URL is not a valid Modrinth or CurseForge mod link.',
+        steps: [
+          'Make sure you\'re using a direct mod page URL',
+          'Supported formats: modrinth.com/mod/[slug] or curseforge.com/minecraft/mc-mods/[slug]',
+          'Copy the URL from your browser\'s address bar',
+          'Verify the URL is complete and not truncated',
+        ],
+      }
+    );
+  }
+
+  static modApiError(platform: string, originalError?: Error): LauncherError {
+    return new LauncherError(
+      ErrorCode.MOD_API_ERROR,
+      `Failed to connect to ${platform} API`,
+      {
+        message: `Unable to fetch mod information from ${platform}.`,
+        steps: [
+          'Check your internet connection',
+          `Verify ${platform} is operational`,
+          'Try again in a few moments',
+          'Check if a firewall is blocking the connection',
+        ],
+      },
+      originalError
+    );
+  }
+
+  // Forge-specific error factory methods
+
+  static forgeInstallFailed(gameVersion: string, forgeVersion: string, reason: string, originalError?: Error): LauncherError {
+    return new LauncherError(
+      ErrorCode.FORGE_INSTALL_FAILED,
+      `Failed to install Forge ${forgeVersion} for Minecraft ${gameVersion}`,
+      {
+        message: `Forge installation encountered an error: ${reason}`,
+        steps: [
+          'Check your internet connection',
+          'Verify you have sufficient disk space',
+          'Ensure you have write permissions to the installation directory',
+          'Try installing a different Forge version',
+          'Check if antivirus software is blocking the installation',
+        ],
+      },
+      originalError
+    );
+  }
+
+  static forgeVersionIncompatible(gameVersion: string, forgeVersion: string): LauncherError {
+    return new LauncherError(
+      ErrorCode.FORGE_VERSION_INCOMPATIBLE,
+      `Forge ${forgeVersion} is not compatible with Minecraft ${gameVersion}`,
+      {
+        message: `The selected Forge version doesn't support this Minecraft version.`,
+        steps: [
+          'Choose a different Forge version from the compatibility list',
+          'Update to a supported Minecraft version',
+          'Check the Forge website for version compatibility information',
+          'Try using the recommended Forge version for this Minecraft version',
+        ],
+      }
+    );
+  }
+
+  static forgeProfileCreationFailed(profileName: string, reason: string, originalError?: Error): LauncherError {
+    return new LauncherError(
+      ErrorCode.FORGE_PROFILE_CREATION_FAILED,
+      `Failed to create Forge profile "${profileName}"`,
+      {
+        message: `Profile creation failed: ${reason}`,
+        steps: [
+          'Try using a different profile name',
+          'Check if you have write permissions to the profiles directory',
+          'Ensure sufficient disk space is available',
+          'Verify the installation directory is accessible',
+          'Try restarting the launcher',
+        ],
+      },
+      originalError
+    );
+  }
+
+  static optifineDownloadFailed(gameVersion: string, reason: string, originalError?: Error): LauncherError {
+    return new LauncherError(
+      ErrorCode.OPTIFINE_DOWNLOAD_FAILED,
+      `Failed to download OptiFine for Minecraft ${gameVersion}`,
+      {
+        message: `OptiFine download encountered an error: ${reason}`,
+        steps: [
+          'Check your internet connection',
+          'Verify OptiFine servers are operational',
+          'Try downloading OptiFine manually from optifine.net',
+          'Check if a firewall is blocking the download',
+          'Try again in a few minutes',
+        ],
+      },
+      originalError
+    );
+  }
+
+  static optifineIncompatible(gameVersion: string, forgeVersion: string): LauncherError {
+    return new LauncherError(
+      ErrorCode.OPTIFINE_INCOMPATIBLE,
+      `OptiFine is not compatible with Minecraft ${gameVersion} and Forge ${forgeVersion}`,
+      {
+        message: `No compatible OptiFine version found for this combination.`,
+        steps: [
+          'Try using a different Forge version',
+          'Check if OptiFine supports this Minecraft version',
+          'Consider using alternative performance mods like Sodium (for Fabric)',
+          'Visit optifine.net to check version compatibility',
+          'Continue without OptiFine for now',
+        ],
+      }
+    );
+  }
+
+  static optifineInstallFailed(reason: string, originalError?: Error): LauncherError {
+    return new LauncherError(
+      ErrorCode.OPTIFINE_INSTALL_FAILED,
+      `Failed to install OptiFine`,
+      {
+        message: `OptiFine installation failed: ${reason}`,
+        steps: [
+          'Check if you have write permissions to the mods directory',
+          'Verify sufficient disk space is available',
+          'Try downloading OptiFine again',
+          'Check if antivirus software is blocking the installation',
+          'Continue without OptiFine if the issue persists',
+        ],
+      },
+      originalError
+    );
+  }
+
+  static forgeModStateFailed(modName: string, operation: string, originalError?: Error): LauncherError {
+    return new LauncherError(
+      ErrorCode.FORGE_MOD_STATE_FAILED,
+      `Failed to ${operation} mod "${modName}"`,
+      {
+        message: `Could not change the state of the mod.`,
+        steps: [
+          'Check if you have write permissions to the mods directory',
+          'Verify the mod file exists and is not corrupted',
+          'Close any programs that might be using the mod file',
+          'Try restarting the launcher',
+          'Check if antivirus software is interfering',
+        ],
+      },
+      originalError
+    );
+  }
+
+  static forgeDirectoryAccessFailed(directory: string, operation: string, originalError?: Error): LauncherError {
+    return new LauncherError(
+      ErrorCode.FORGE_DIRECTORY_ACCESS_FAILED,
+      `Cannot access Forge directory for ${operation}`,
+      {
+        message: `Unable to access the directory: ${directory}`,
+        steps: [
+          'Check if the directory exists',
+          'Verify you have read/write permissions to the directory',
+          'Ensure the directory is not being used by another program',
+          'Try running the launcher with appropriate permissions',
+          'Check if antivirus software is blocking access',
         ],
       },
       originalError

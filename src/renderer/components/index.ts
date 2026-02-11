@@ -7,3 +7,4 @@ export { LoadingSpinner } from './LoadingSpinner';
 export { LauncherInterface } from './LauncherInterface';
 export { ProfileManager } from './ProfileManager';
 export { VersionSelector } from './VersionSelector';
+export { ModToggleDialog } from './ModToggleDialog';

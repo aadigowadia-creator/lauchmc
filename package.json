@@ -1,10 +1,11 @@
 {
-  "name": "Hello World",
+  "name": "hello-world",
   "version": "1.0.0",
   "description": "A Minecraft launcher application built with Electron, React, and TypeScript",
   "main": "dist/main/main.js",
   "homepage": "./",
   "scripts": {
+    "postinstall": "electron-rebuild",
     "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:main\"",
     "dev:main": "cross-env NODE_ENV=development tsc -p tsconfig.main.json && electron dist/main/main.js",
     "dev:renderer": "vite",
@@ -63,7 +64,7 @@
     "vite-plugin-electron": "^0.15.5"
   },
   "dependencies": {
-    "axios": "^1.6.2",
+    "axios": "^1.13.2",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.1.7",
     "react": "^18.2.0",
@@ -166,7 +167,8 @@
       ],
       "icon": "build/icon.ico",
       "publisherName": "Minecraft Launcher",
-      "verifyUpdateCodeSignature": false
+      "verifyUpdateCodeSignature": false,
+      "sign": null
     },
     "nsis": {
       "oneClick": false,
