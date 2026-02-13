@@ -1,4 +1,4 @@
-import { BrowserWindow, shell } from 'electron';
+import { BrowserWindow } from 'electron';
 import axios from 'axios';
 import Store from 'electron-store';
 import { AuthenticationData } from '../models';
@@ -130,8 +130,13 @@ export class AuthService {
 
       this.authWindow.loadURL(authUrl);
 
+      let handled = false;
+
       const handleCallback = async (url: string) => {
+        if (handled) return;
+        
         if (url.includes('code=') || url.includes('error=')) {
+          handled = true;
           try {
             const urlObj = new URL(url);
             const code = urlObj.searchParams.get('code');
@@ -157,26 +162,32 @@ export class AuthService {
       };
 
       // Handle navigation to capture authorization code
-      this.authWindow.webContents.on('will-navigate', async (event, navigationUrl) => {
-        event.preventDefault();
-        await handleCallback(navigationUrl);
+      this.authWindow.webContents.on('will-navigate', async (_event, navigationUrl) => {
+        if (navigationUrl.includes('code=') || navigationUrl.includes('error=')) {
+          _event.preventDefault();
+          await handleCallback(navigationUrl);
+        }
       });
 
       // Also handle redirects
-      this.authWindow.webContents.on('will-redirect', async (event, navigationUrl) => {
-        event.preventDefault();
-        await handleCallback(navigationUrl);
+      this.authWindow.webContents.on('will-redirect', async (_event, navigationUrl) => {
+        if (navigationUrl.includes('code=') || navigationUrl.includes('error=')) {
+          _event.preventDefault();
+          await handleCallback(navigationUrl);
+        }
       });
 
       // Check URL changes
-      this.authWindow.webContents.on('did-navigate', async (event, navigationUrl) => {
+      this.authWindow.webContents.on('did-navigate', async (_event, navigationUrl) => {
         await handleCallback(navigationUrl);
       });
 
       // Handle window closed without authentication
       this.authWindow.on('closed', () => {
         this.authWindow = null;
-        reject(new Error('Authentication window was closed'));
+        if (!handled) {
+          reject(new Error('Authentication window was closed'));
+        }
       });
     });
   }
