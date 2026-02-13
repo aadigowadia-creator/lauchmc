@@ -113,8 +113,7 @@ export class AuthService {
         `client_id=${MICROSOFT_CLIENT_ID}&` +
         `response_type=code&` +
         `redirect_uri=${encodeURIComponent(MICROSOFT_REDIRECT_URI)}&` +
-        `scope=${encodeURIComponent(MICROSOFT_SCOPE)}&` +
-        `response_mode=query`;
+        `scope=${encodeURIComponent(MICROSOFT_SCOPE)}`;
 
       // Create authentication window
       this.authWindow = new BrowserWindow({
